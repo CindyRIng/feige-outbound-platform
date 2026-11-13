@@ -18,7 +18,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "acceptance": "node scripts/acceptance.mjs",
     "reconcile": "node scripts/reconcile.mjs",
-    "mcp:smoke": "node scripts/mcp-smoke.mjs"
+    "mcp:smoke": "node scripts/mcp-smoke.mjs",
+    "live-dial": "node scripts/live-dial.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
