@@ -6,7 +6,7 @@
  * 用法：
  *   node scripts/live-dial.mjs                      # 预检（不呼出）
  *   node scripts/live-dial.mjs --confirm            # 真实呼出 + 全程状态/流水线观测
- *   node scripts/live-dial.mjs --confirm --to 133****2072 --account main
+ *   node scripts/live-dial.mjs --confirm --to <被叫号码> --account main
  * 产出：docs/14-live-dial-evidence.json（callId、时间线、录音/转写/分析证据）
  */
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -19,7 +19,7 @@ const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : def; };
 const has = (name) => args.includes(name);
 const API = opt('--api', process.env.FOP_API_URL ?? 'http://127.0.0.1:8710/api/v1');
-const TO = opt('--to', '133****2072');
+const TO = opt('--to', '');
 const ACCOUNT = opt('--account', 'main');
 const CONFIRM = has('--confirm');
 const RETRIES = Number(opt('--retries', '2'));
@@ -83,6 +83,7 @@ async function pollDial(callId) {
 }
 
 async function main() {
+  if (!/^1[3-9]\d{9}$/.test(TO)) { console.error('必须通过 --to 指定 11 位被叫手机号（示例：--to 133****2072）'); process.exit(2); }
   const { dw, account, dialOpen } = await preflight();
   log(`计划：真实呼出至 ${TO.slice(0, 3)}****${TO.slice(7)}（坐席 156****0075 需接听）账号=${ACCOUNT}`);
   if (!dialOpen) {
