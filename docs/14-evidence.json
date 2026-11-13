@@ -1,8 +1,8 @@
 {
-  "ts": "2026-11-13T17:18:45.279Z",
+  "ts": "2026-11-13T18:41:27.525Z",
   "api": "http://127.0.0.1:8710/api/v1",
-  "pass": 21,
-  "fail": 1,
+  "pass": 22,
+  "fail": 0,
   "warn": 0,
   "results": [
     {
@@ -23,7 +23,7 @@
       "id": "M1-STATUS",
       "name": "GET /status（db/账号/时段/队列）",
       "ok": true,
-      "detail": "db=true accounts=1 online=1 jobsQueued=1206",
+      "detail": "db=true accounts=1 online=1 jobsQueued=0",
       "level": "error"
     },
     {
@@ -51,14 +51,14 @@
       "id": "M1-JWT",
       "name": "JWT 有效期 > 1 天",
       "ok": true,
-      "detail": "expiresInSec=604076",
+      "detail": "expiresInSec=603639",
       "level": "error"
     },
     {
       "id": "M2-SYNC",
       "name": "话单已同步（total>0）",
       "ok": true,
-      "detail": "total=4106",
+      "detail": "total=4107",
       "level": "error"
     },
     {
@@ -85,8 +85,8 @@
     {
       "id": "M4-ANALYSIS",
       "name": "AI 后处理产出（summary/intent/usage）",
-      "ok": false,
-      "detail": "intent=undefined model=undefined prompt=undefined",
+      "ok": true,
+      "detail": "intent=无意向 model=deepseek-chat prompt=analysis-v1",
       "level": "error"
     },
     {
@@ -156,7 +156,7 @@
       "id": "M4-BACKFILL",
       "name": "全量回填进度（可观测）",
       "ok": true,
-      "detail": "{\"audio_ready\":690,\"tr_ready\":113,\"an_ready\":0,\"total\":4107}",
+      "detail": "{\"audio_ready\":1681,\"tr_ready\":1681,\"an_ready\":1667,\"total\":4108}",
       "level": "error"
     }
   ]

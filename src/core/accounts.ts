@@ -10,6 +10,8 @@ import { maskPhone } from '../util/phone.js';
 import type { Logger } from '../logger.js';
 import type { UpstreamClient, LoginResult, UpstreamLine } from '../upstream/types.js';
 import { newAuditId } from './ids.js';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 export interface LoginRunOpts { accountId: string; username: string; password: string; profileDir: string; headless: boolean; configDir: string; timeoutMs?: number; }
 export interface AccountSvcDeps {
@@ -103,7 +105,8 @@ export class AccountService {
     if (inProgress) throw new AppError('ACCOUNT_LOGIN_IN_PROGRESS', '该账号登录进行中', { details: { loginJobId: inProgress.jobId } });
     if (!opts.force) {
       const session = await this.d.repo.getSession(accountId);
-      if (session?.token && session.state === 'online') return { job: { jobId: 'cached', type: 'login', status: 'succeeded' } as Job, wait: false };
+      const expOk = !session?.jwtExpiresAt || new Date(session.jwtExpiresAt).getTime() > Date.now() + 60_000;
+      if (session?.token && session.state === 'online' && expOk) return { job: { jobId: 'cached', type: 'login', status: 'succeeded' } as Job, wait: false };
     }
     const job = await this.d.jobs.enqueue('login', { accountId, payload: { force: !!opts.force }, maxAttempts: 3 });
     return { job, wait: !!opts.wait };
@@ -128,9 +131,22 @@ export class AccountService {
     await this.d.repo.updateAccount(accountId, { state: 'logging_in', updatedAt: new Date().toISOString() });
     await this.d.events.emit({ type: 'account.login.started', accountId, jobId: job.jobId, data: { accountId } });
     const profileDir = `${this.d.config.paths().profilesDir}/${a.browserProfileDir ?? accountId}`;
+    const payload = job.payloadJson ? (JSON.parse(job.payloadJson) as { force?: boolean }) : {};
+    const clearProfile = (): void => { if (existsSync(profileDir)) { try { rmSync(profileDir, { recursive: true, force: true }); } catch { /* ignore */ } } };
+    if (payload.force) clearProfile();
+    const verifyToken = async (token: string): Promise<boolean> => {
+      try { await this.client(accountId, token).getUserDetail(); return true; } catch (e) { return (e as { code?: string }).code !== 'UPSTREAM_AUTH_EXPIRED'; }
+    };
     let result: LoginResult;
     try {
       result = await this.d.runLogin({ accountId, username: sec.username, password: sec.password, profileDir, headless: !!(a.browserHeadless ?? false), configDir: CONFIG_DIR, timeoutMs: 150000 });
+      // 校验 JWT 是否真实可用：worker 可能从旧 profile 复用已被服务端登出的 JWT
+      if (result.ok && result.jwt && !(await verifyToken(result.jwt))) {
+        this.d.log.warn('login token invalid, retrying with fresh profile', { accountId });
+        clearProfile();
+        result = await this.d.runLogin({ accountId, username: sec.username, password: sec.password, profileDir, headless: !!(a.browserHeadless ?? false), configDir: CONFIG_DIR, timeoutMs: 150000 });
+        if (result.ok && result.jwt && !(await verifyToken(result.jwt))) throw new AppError('ACCOUNT_LOGIN_FAILED', '登录成功但 JWT 校验失败（上游返回 401）', { details: { reason: 'jwt_invalid' } });
+      }
     } catch (e) {
       const err = e as Error & { code?: string };
       await this.d.repo.updateAccount(accountId, { state: 'error', lastErrorJson: JSON.stringify({ code: err.code ?? 'ACCOUNT_LOGIN_FAILED', message: err.message, at: new Date().toISOString() }), updatedAt: new Date().toISOString() });
@@ -164,6 +180,9 @@ export class AccountService {
     await this.d.repo.deleteSession(accountId);
     await this.d.repo.updateAccount(accountId, { state: 'expired', jwtExpiresAt: null, updatedAt: new Date().toISOString() });
     this.lineCache.delete(accountId);
+    // 上游 logout 已使旧 JWT 失效；清空浏览器 profile，避免 worker 复用旧 localStorage/cookie 返回失效 JWT
+    const profileDir = join(this.d.config.paths().profilesDir, a.browserProfileDir ?? accountId);
+    if (existsSync(profileDir)) { try { rmSync(profileDir, { recursive: true, force: true }); } catch { /* ignore */ } }
     await this.audit('account.logout', 'account', accountId, 'success');
   }
   async requireOnlineToken(accountId: string): Promise<string> {
@@ -194,8 +213,10 @@ export class AccountService {
       } catch (e) {
         const err = e as Error & { code?: string };
         if (err.code === 'UPSTREAM_AUTH_EXPIRED') {
+          // 保留 token 便于诊断；仅标记登录态失效（不要清空 jwt_ciphertext，否则无法区分“过期”与“未登录”）
           await this.d.repo.updateAccount(accountId, { state: 'expired', updatedAt: new Date().toISOString() });
-          await this.d.repo.upsertSession({ ...(s as AccountSession), state: 'expired', loginState: 'expired', token: null } as AccountSession);
+          await this.d.repo.upsertSession({ ...(s as AccountSession), state: 'expired', loginState: 'expired' } as AccountSession);
+          this.lineCache.delete(accountId);
           await this.d.events.emit({ type: 'account.session.expired', accountId, data: { detectedBy: 'health' } });
         }
         upstream = { reachable: false, latencyMs: Date.now() - t0, checkedAt: new Date().toISOString() };

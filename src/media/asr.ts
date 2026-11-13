@@ -179,6 +179,13 @@ export function createAsrClient(opts: AsrClientOptions): AsrClient {
       const detailMsg = providerDetail(parsed);
       const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
       const retryable = status === 429 || status >= 500;
+      // 422 Unprocessable：双声道拆分时单个声道可能静音/无有效人声/音频过短 → 合法空结果（不重试）
+      // 已实测错误体：{"type":"error","error":{"type":"unprocessable_entity_error","message":"No clear speaker was detected... (711)"}}
+      if (status === 422) {
+        const raw = JSON.stringify(parsed ?? {});
+        logger?.warn('ASR 422 无法处理（静音/无有效人声/过短），按空结果处理', { httpStatus: status, detail: raw.slice(0, 300) });
+        return { text: '', durationMs: 0, nSpeakers: 0, segments: [], traceId: null };
+      }
       throw err(`MiniMax ASR HTTP ${status}${detailMsg ? `: ${detailMsg}` : ''}`, {
         retryable,
         providerCode,

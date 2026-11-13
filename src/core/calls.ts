@@ -62,8 +62,10 @@ export class CallsService {
     const cooldownSince = new Date(Date.now() - cfg.limits.dialCooldownMs).toISOString();
     const recent = await this.d.repo.findRecentDial(accountId, to, cooldownSince);
     if (recent) throw new AppError('IDEMPOTENCY_CONFLICT', '该号码在冷却期内已呼出', { details: { recentCallId: recent.callId } });
-    const openCalls = await this.d.repo.countOpenCalls(accountId);
-    if (openCalls > 0) throw new AppError('ACCOUNT_BUSY', '账号正在通话中', { details: { busyCallId: null } });
+    // 并发占用：dialing/connected 一定占用；pending 仅“已到点”的占用（时段外排队的未来任务不应阻塞新建呼出）
+    const openList = await this.d.repo.listCalls({ page: 1, size: 50, statuses: ['pending', 'dialing', 'connected'], accountIds: [accountId] } as CallFilter);
+    const blocking = openList.items.filter(c => c.status !== 'pending' || !c.scheduledAt || new Date(c.scheduledAt).getTime() <= Date.now());
+    if (blocking.length > 0) throw new AppError('ACCOUNT_BUSY', '账号正在通话中', { details: { busyCallId: blocking[0].callId } });
     const token = await this.d.accounts.requireOnlineToken(accountId);
     const now = new Date();
     const scheduledAt = input.scheduledAt ?? (dw.open ? now.toISOString() : dw.nextOpenAt ?? now.toISOString());
