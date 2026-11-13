@@ -22,9 +22,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.local/share/feige-outbound %h/.config/feige-outbound %h/.cache/ms-playwright %h/.cloakbrowser
+ReadWritePaths=%h/.local/share/feige-outbound %h/.config/feige-outbound %h/.cache %h/.local/state %h/.cloakbrowser
 # 需要写入浏览器 profile 时放宽：
-# ReadWritePaths=%h/.local/share/feige-outbound %h/.config/feige-outbound %h/.cache/ms-playwright %h/.cloakbrowser %h/.local/share/feige-outbound/profiles
+# ReadWritePaths=%h/.local/share/feige-outbound %h/.config/feige-outbound %h/.cache %h/.local/state %h/.cloakbrowser %h/.local/share/feige-outbound/profiles
 
 [Install]
 WantedBy=default.target

@@ -12,12 +12,14 @@ import { CallsService } from './core/calls.js';
 import { StatusService } from './core/status.js';
 import { createUpstreamClient } from './upstream/client.js';
 import { runLogin } from './upstream/auth.js';
+import { openRealtime } from './upstream/realtime.js';
+import type { RealtimeHandle } from './upstream/types.js';
 import { createAsrClient } from './media/asr.js';
 import { createAnalysisClient } from './media/analysis.js';
 import { createServer } from './api/server.js';
 import type { Services } from './api/context.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const UPSTREAM_BASE = process.env.FOP_UPSTREAM_BASE_URL ?? 'https://feige.duofangtongxin.com/duofang-feige-admin';
 
 export async function startServer(args: string[] = []): Promise<void> {
@@ -87,18 +89,44 @@ export async function startServer(args: string[] = []): Promise<void> {
 
   const schedulerTimer = setInterval(() => { calls.tick().catch(e => log.warn('scheduler tick failed', { err: e.message })); }, 2000);
   const syncTimer = cfg.sync.intervalMs > 0 ? setInterval(() => { sync.start('incremental').catch(e => log.warn('auto sync failed', { err: e.message })); }, cfg.sync.intervalMs) : null;
+  const realtimeHandles = new Map<string, RealtimeHandle>();
+  const ensureRealtime = async (accountId: string): Promise<void> => {
+    if (realtimeHandles.has(accountId)) return;
+    try {
+      const session = await repo.getSession(accountId);
+      if (!session?.token) return;
+      const handle = openRealtime({ baseUrl: UPSTREAM_BASE, token: session.token, onMessage: () => { /* 通话事件推送（M3 起可扩展） */ } });
+      realtimeHandles.set(accountId, handle);
+      setTimeout(async () => {
+        try {
+          const cur = await repo.getSession(accountId);
+          if (cur) await repo.upsertSession({ ...cur, wsConnected: handle.connected, lastPongAt: handle.lastPongAt ?? null });
+        } catch { /* ignore */ }
+      }, 3000);
+    } catch { /* ignore */ }
+  };
   const keepAliveTimer = setInterval(async () => {
     try {
       const list = await repo.listAccounts({ enabled: true });
-      for (const a of list) if (a.state === 'online') accounts.health(a.accountId).catch(() => { /* ignore */ });
+      for (const a of list) {
+        if (a.state === 'online') {
+          accounts.health(a.accountId).catch(() => { /* ignore */ });
+          void ensureRealtime(a.accountId);
+        } else if (a.state === 'expired' || a.state === 'disabled' || a.state === 'error') {
+          const h = realtimeHandles.get(a.accountId); if (h) { try { h.close(); } catch { /* ignore */ } realtimeHandles.delete(a.accountId); }
+        }
+      }
     } catch { /* ignore */ }
   }, Math.max(30000, cfg.runtime.keepAliveMs));
+  // 启动后立即建立一次实时通道
+  setTimeout(() => { repo.listAccounts({ enabled: true }).then(list => { for (const a of list) if (a.state === 'online') void ensureRealtime(a.accountId); }).catch(() => { /* ignore */ }); }, 3000);
 
   const shutdown = async (sig: string) => {
     log.info('shutting down', { signal: sig });
     clearInterval(schedulerTimer); if (syncTimer) clearInterval(syncTimer); clearInterval(keepAliveTimer);
     try { await app.close(); } catch { /* ignore */ }
     await jobs.stop();
+    for (const h of realtimeHandles.values()) { try { h.close(); } catch { /* ignore */ } }
     try { await repo.close(); } catch { /* ignore */ }
     setTimeout(() => process.exit(0), 200);
   };
