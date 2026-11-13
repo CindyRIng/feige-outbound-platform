@@ -1,0 +1,12 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+const transport = new StdioClientTransport({ command: 'node', args: ['dist/src/main.js', 'mcp'], env: { ...process.env } });
+const client = new Client({ name: 'test', version: '0.1.0' });
+await client.connect(transport);
+const tools = await client.listTools();
+console.log('MCP tools:', tools.tools.length);
+const res = await client.callTool({ name: 'feige_status', arguments: { detail: false } });
+console.log('feige_status isError:', res.isError, 'preview:', JSON.stringify(res.content).slice(0, 180));
+const res2 = await client.callTool({ name: 'feige_call_list', arguments: { size: 2 } });
+console.log('feige_call_list isError:', res2.isError, 'preview:', JSON.stringify(res2.content).slice(0, 300));
+await client.close();

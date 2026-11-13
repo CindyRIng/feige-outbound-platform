@@ -1,0 +1,163 @@
+{
+  "ts": "2026-11-13T17:18:45.279Z",
+  "api": "http://127.0.0.1:8710/api/v1",
+  "pass": 21,
+  "fail": 1,
+  "warn": 0,
+  "results": [
+    {
+      "id": "M5-HEALTH",
+      "name": "GET /health",
+      "ok": true,
+      "detail": "status=200",
+      "level": "error"
+    },
+    {
+      "id": "M5-AUTH",
+      "name": "错误 token 返回 401 UNAUTHORIZED",
+      "ok": true,
+      "detail": "status=401 code=UNAUTHORIZED",
+      "level": "error"
+    },
+    {
+      "id": "M1-STATUS",
+      "name": "GET /status（db/账号/时段/队列）",
+      "ok": true,
+      "detail": "db=true accounts=1 online=1 jobsQueued=1206",
+      "level": "error"
+    },
+    {
+      "id": "M1-DIALWIN",
+      "name": "拨打时段计算",
+      "ok": true,
+      "detail": "{\"open\":false,\"windowStart\":\"07:50\",\"windowEnd\":\"22:00\",\"timezone\":\"Asia/Shanghai\",\"nextOpenAt\":\"2026-11-13T23:50:00.000Z\"}",
+      "level": "error"
+    },
+    {
+      "id": "M1-ACCOUNT",
+      "name": "账号列表",
+      "ok": true,
+      "detail": "count=1",
+      "level": "error"
+    },
+    {
+      "id": "M1-LOGIN",
+      "name": "账号在线 + 上游可达 + 线路",
+      "ok": true,
+      "detail": "state=online upstream=true line=电信回拨",
+      "level": "error"
+    },
+    {
+      "id": "M1-JWT",
+      "name": "JWT 有效期 > 1 天",
+      "ok": true,
+      "detail": "expiresInSec=604076",
+      "level": "error"
+    },
+    {
+      "id": "M2-SYNC",
+      "name": "话单已同步（total>0）",
+      "ok": true,
+      "detail": "total=4106",
+      "level": "error"
+    },
+    {
+      "id": "M4-TRANSCRIPT",
+      "name": "转写样例（source=asr/分段/说话人角色）",
+      "ok": true,
+      "detail": "segs=2 roles=customer,agent provider=minimax:asr-1.0",
+      "level": "error"
+    },
+    {
+      "id": "M4-CHANNEL",
+      "name": "双声道拆分（segment.channel 0/1 存在）",
+      "ok": true,
+      "detail": "channels=1,0",
+      "level": "error"
+    },
+    {
+      "id": "M2-AUDIO",
+      "name": "录音归档（8k/2ch WAV）",
+      "ok": true,
+      "detail": "sampleRate=8000 channels=2 size=481964",
+      "level": "error"
+    },
+    {
+      "id": "M4-ANALYSIS",
+      "name": "AI 后处理产出（summary/intent/usage）",
+      "ok": false,
+      "detail": "intent=undefined model=undefined prompt=undefined",
+      "level": "error"
+    },
+    {
+      "id": "M2-AUDIO-IO",
+      "name": "录音下载（Range/Content-Type/RIFF）",
+      "ok": true,
+      "detail": "http=206 bytes=44",
+      "level": "error"
+    },
+    {
+      "id": "M5-ERROR",
+      "name": "CALL_NOT_FOUND 404",
+      "ok": true,
+      "detail": "status=404",
+      "level": "error"
+    },
+    {
+      "id": "M4-TERMS",
+      "name": "POST /text/normalize（复萌/福梦→孚盟）",
+      "ok": true,
+      "detail": "孚盟和孚盟的系统",
+      "level": "error"
+    },
+    {
+      "id": "M3-DRYRUN",
+      "name": "POST /calls dryRun",
+      "ok": true,
+      "detail": "willDial=true",
+      "level": "error"
+    },
+    {
+      "id": "M3-WINDOW",
+      "name": "时段外受理为 pending（scheduleOutsideWindow=true）",
+      "ok": true,
+      "detail": "status=pending reason=等待拨打时段",
+      "level": "error"
+    },
+    {
+      "id": "M3-CANCEL",
+      "name": "pending 呼出可取消（204/200）",
+      "ok": true,
+      "detail": "canceled",
+      "level": "error"
+    },
+    {
+      "id": "M5-JOBS",
+      "name": "GET /jobs",
+      "ok": true,
+      "detail": "count=3",
+      "level": "error"
+    },
+    {
+      "id": "M5-CLI",
+      "name": "CLI status --json（REST 同构 envelope）",
+      "ok": true,
+      "detail": "exit=0",
+      "level": "error"
+    },
+    {
+      "id": "M5-MCP",
+      "name": "MCP tools/list + feige_status",
+      "ok": true,
+      "detail": "tools=18",
+      "level": "error"
+    },
+    {
+      "id": "M4-BACKFILL",
+      "name": "全量回填进度（可观测）",
+      "ok": true,
+      "detail": "{\"audio_ready\":690,\"tr_ready\":113,\"an_ready\":0,\"total\":4107}",
+      "level": "error"
+    }
+  ]
+}

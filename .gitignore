@@ -1,0 +1,32 @@
+# 依赖与构建
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 环境变量与凭证
+.env
+.env.*
+!.env.example
+credentials*.json
+*.token
+
+# 本地数据库与音频存档（含个人信息）
+data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.wav
+*.mp3
+*.ogg
+
+# 侦察/调试产物（可能含个人信息、登录态）
+exploration/**/artifacts/
+exploration/**/*.jsonl
+exploration/**/storage-state*.json
+exploration/**/cookies*.json
+*.png
+.playwright-mcp/
+
+# 日志
+*.log

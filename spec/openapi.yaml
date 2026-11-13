@@ -1,0 +1,5698 @@
+openapi: 3.1.0
+
+info:
+  title: 飞鸽外呼本地平台（FOP）REST v1 API
+  version: 0.1.0
+  summary: REST v1 机器可读契约（35 个操作）
+  description: |
+    本文件是 `docs/05-对外API契约.md` 的机器可读副本（OpenAPI 3.1）；人类可读权威契约以
+    `docs/05-对外API契约.md` + `docs/01-决策与约定.md` 为准，冲突时以文档为准并在评审中回改。
+    spec 本身不新增 docs/05 未定义的字段，未明确处以 optional / nullable 保守建模（见 spec/README.md「待确认」）。
+
+    - Base URL：`http://127.0.0.1:8710/api/v1`（默认仅监听 127.0.0.1，端口可配置）。
+    - 认证：所有操作需要 `Authorization: Bearer <localApiToken>`（见 securitySchemes.bearerAuth）。
+    - 封套：成功 `{ ok: true, data, meta }`；失败 `{ ok: false, error, meta }`；`meta.pagination` 仅列表接口出现。
+    - 错误码：`ErrorObject.code` 枚举来自 `docs/01-决策与约定.md` §5.4（40 个稳定码，新增只增不改；
+      适配层/后台作业的内部错误码不对外，必须归一为上述稳定码之一（docs/01 §5.4 注））；
+      每个操作通过 `x-error-codes` 列出 docs/05 允许的业务错误码，供契约测试与 SDK 生成使用。
+    - 全局错误：`429 RATE_LIMITED` 适用于全部接口（见共享 TooManyRequests 响应）；
+      `503 SERVICE_UNAVAILABLE` 表示本地服务暂不可用（启动中/优雅关闭/传输被中断）。
+    - 写接口 data 采用 docs/05 §2.14 定义的操作结果 DTO（CallAccepted/DryRunResult/AccountCreateResult/
+      AccountLoginResult/AccountLoginAccepted/SyncAccepted/ReprocessAccepted/TermReplaceResult/NormalizeResult/WebhookTestResult）。
+    - v1 转写**全部由本地自建 ASR（MiniMax asr-1.0）生成**，不使用上游转写；AI 后处理为 DeepSeek 内置 pipeline
+      （docs/13）。故 `TranscriptSource` 固定 `asr`，错误码中已删除 `UPSTREAM_TRANSCRIPT_PENDING`。
+    - 时间：ISO 8601 带时区（+08:00）；日期过滤用 `YYYY-MM-DD`（Asia/Shanghai）。ID 规则见 docs/01 §5.6。
+    - 幂等：写接口可带 `Idempotency-Key`；重放响应 `meta.idempotencyReplayed=true`（docs/05 §1.2/§9）。
+    - 上游原始值（毫秒时间戳、雪花 ID、原始状态码）只在 `upstream` 对象中出现，不参与本地业务判断。
+    - 安全：示例中的手机号一律脱敏（如 `138****0000`）；禁止在示例/日志中出现真实密码、JWT、完整手机号。
+    - 契约版本 v0.1（2026-11-14）；破坏性变更升级 `/api/v2`，变更流程见 docs/05 §11。
+  externalDocs:
+    description: 人类可读权威契约（docs/05-对外API契约.md）
+    url: ../docs/05-对外API契约.md
+
+servers:
+  - url: http://127.0.0.1:8710/api/v1
+    description: 本地默认地址（端口可配置，默认 8710；默认仅监听 127.0.0.1）
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: platform
+    description: 平台自身健康与配置（health / status / config）
+  - name: accounts
+    description: 上游账号注册、登录、健康与移除（账号池）
+  - name: calls
+    description: 呼出（真实外呼，有副作用/计费）与话单、录音、转写、事件
+  - name: sync
+    description: 上游话单同步作业
+  - name: jobs
+    description: 后台作业（login/sync/audio_fetch/asr/analysis/reprocess/backfill；v1 已删除 transcript_fetch/transcript_pending_wait）
+  - name: events
+    description: 事件历史查询与 SSE 事件流
+  - name: webhooks
+    description: 出站 webhook 测试（v1 可选）
+  - name: terms
+    description: 领域词表归一规则
+  - name: text
+    description: 文本归一化工具（同步、无副作用）
+
+paths:
+  /health:
+    get:
+      tags: [platform]
+      summary: 存活探针
+      description: |
+        存活探针（不做上游检查，快速返回），对应 docs/05 §4.1。
+        仅返回进程存活与版本信息；平台完整健康见 GET /status。
+      operationId: getHealth
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 服务存活
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/HealthPayload'
+              examples:
+                alive:
+                  summary: 存活（docs/05 §4.1 示例）
+                  value:
+                    ok: true
+                    data:
+                      ok: true
+                      uptimeSec: 3610
+                      version: "0.1.0"
+                      startedAt: "2026-11-14T09:00:00+08:00"
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /status:
+    get:
+      tags: [platform]
+      summary: 平台状态
+      description: |
+        平台自身健康（对应图中 `getStatus → Status`）：进程、DB、账号池、上游可达、拨打时段、
+        队列积压、同步延迟，对应 docs/05 §4.2。响应 `data` 为 StatusPayload（docs/05 §2.11）。
+      operationId: getStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: detail
+          in: query
+          required: false
+          description: 是否返回 `accountsDetail` 全量账号摘要（默认 true；账号数 >200 时服务端可只返回聚合）
+          schema:
+            type: boolean
+            default: true
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, DB_UNAVAILABLE, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 平台状态
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StatusPayload'
+              examples:
+                status:
+                  summary: 平台状态（docs/05 §4.2 示例，accountsDetail 按 AccountSummary 必填字段补全）
+                  value:
+                    ok: true
+                    data:
+                      version: "0.1.0"
+                      startedAt: "2026-11-14T09:00:00+08:00"
+                      uptimeSec: 3610
+                      now: "2026-11-14T10:00:00+08:00"
+                      db:
+                        ok: true
+                        schemaVersion: 1
+                        sizeBytes: 25165824
+                        walSizeBytes: 1048576
+                        latencyMs: 1
+                      accounts:
+                        total: 2
+                        online: 1
+                        expired: 1
+                        loggingIn: 0
+                        error: 0
+                        disabled: 0
+                      accountsDetail:
+                        - accountId: main
+                          displayName: 主账号
+                          upstreamUsernameMasked: "156****0075"
+                          upstreamUserId: "1001"
+                          tenantCode: "24421"
+                          enterpriseName: 示例企业
+                          realName: 坐席A
+                          dialMode: callback
+                          line:
+                            lineId: "9"
+                            lineName: 电信回拨
+                            mode: 1
+                          enabled: true
+                          state: online
+                          jwtExpiresAt: "2026-11-21T09:00:00+08:00"
+                          lastLoginAt: "2026-11-14T08:00:00+08:00"
+                          lastCheckedAt: "2026-11-14T09:59:50+08:00"
+                          lastError: null
+                          stats:
+                            totalCalls: 1073
+                            calls24h: 12
+                            lastCallAt: "2026-11-14T09:30:00+08:00"
+                          createdAt: "2026-11-01T09:00:00+08:00"
+                          updatedAt: "2026-11-14T09:59:50+08:00"
+                      upstream:
+                        reachable: true
+                        lastCheckedAt: "2026-11-14T09:59:50+08:00"
+                        latencyMs: 180
+                      dialWindow:
+                        open: true
+                        windowStart: "07:50"
+                        windowEnd: "22:00"
+                        timezone: Asia/Shanghai
+                        nextOpenAt: null
+                      queues:
+                        jobsQueued: 3
+                        jobsRunning: 1
+                        jobsFailed24h: 0
+                        audioPending: 2
+                        transcriptPending: 1
+                        analysisPending: 0
+                      sync:
+                        lastSyncAt: "2026-11-14T09:59:30+08:00"
+                        laggingAccounts: []
+                        lastError: null
+                      events:
+                        sseClients: 1
+                      limits:
+                        apiQps: 100
+                        perAccountConcurrency: 1
+                        globalConcurrency: 8
+                        dialCooldownMs: 60000
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /config:
+    get:
+      tags: [platform]
+      summary: 读取配置
+      description: |
+        返回生效配置（对应 docs/05 §4.3、§2.13）：与 docs/01 §9 结构对应，密钥字段一律脱敏。
+        响应 `data` 为 Config；`server.host/port` 等修改需重启生效。
+      operationId: getConfig
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, CONFIG_INVALID, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 生效配置（脱敏）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Config'
+              examples:
+                config:
+                  summary: 生效配置（docs/05 §2.13 示例）
+                  value:
+                    ok: true
+                    data:
+                      server:
+                        host: 127.0.0.1
+                        port: 8710
+                        allowRemote: false
+                      storage:
+                        dataDir: /home/<user>/.local/share/feige-outbound
+                        dbFile: fop.db
+                        audioDir: audio
+                      browser:
+                        headless: false
+                        profileRoot: /home/<user>/.local/share/feige-outbound/profiles
+                        executablePathMasked: null
+                      dial:
+                        windowStart: "07:50"
+                        windowEnd: "22:00"
+                        timezone: Asia/Shanghai
+                        scheduleOutsideWindow: true
+                      limits:
+                        perAccountConcurrency: 1
+                        globalConcurrency: 8
+                        upstreamReadQps: 5
+                        dialCooldownMs: 60000
+                        apiQps: 100
+                      sync:
+                        intervalMs: 60000
+                        pageSize: 100
+                        lookbackDays: 7
+                      pipeline:
+                        asr: {provider: minimax, baseUrl: 'https://api.minimax.cn', model: asr-1.0, language: zh, chunkSeconds: 420, concurrency: 2}
+                        analysis: {provider: deepseek, baseUrl: 'https://api.deepseek.com', model: deepseek-chat, escalateModel: deepseek-v4-pro, promptVersion: analysis-v1, temperature: 0.2, maxTokens: 2000, concurrency: 8}
+                        roleMapping: {method: auto, llmVerify: true}
+                      events:
+                        sseHeartbeatMs: 15000
+                        webhooks: []
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    patch:
+      tags: [platform]
+      summary: 更新配置
+      description: |
+        JSON Merge Patch（RFC 7386）语义：对象递归合并；显式 `null` 删除该配置项并回落默认值；数组整体替换。
+        仅接受 docs/05 §2.13 Config 中的非密钥字段，对应 docs/05 §4.4；密钥字段只读，
+        尝试修改返回 400 `CONFIG_INVALID`（`details.readonlyFields`）。
+        修改 `server.host/port` 需重启生效：响应 `data.restartRequired=true`。
+        校验要点：`windowStart < windowEnd`；`sync.pageSize ∈ [10,100]`；`sync.intervalMs ≥ 10000`；
+        `limits.perAccountConcurrency=1`（v1 回拨模式固定，其他值 → `VALIDATION_FAILED`）。
+      operationId: patchConfig
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigPatch'
+            examples:
+              partialUpdate:
+                summary: 局部更新（docs/05 §4.4 示例）
+                value:
+                  dial:
+                    scheduleOutsideWindow: false
+                  sync:
+                    intervalMs: 120000
+      x-side-effects: [modifies-config, may-require-restart]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, INVALID_REQUEST, VALIDATION_FAILED, CONFIG_INVALID, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 完整生效配置 + restartRequired
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ConfigPatchResult'
+              examples:
+                updated:
+                  summary: 更新成功（data = 完整 Config + restartRequired；此处省略重复的完整 Config 字段示例）
+                  value:
+                    ok: true
+                    data:
+                      server: {host: 127.0.0.1, port: 8710, allowRemote: false}
+                      storage: {dataDir: /home/<user>/.local/share/feige-outbound, dbFile: fop.db, audioDir: audio}
+                      browser: {headless: false, profileRoot: /home/<user>/.local/share/feige-outbound/profiles, executablePathMasked: null}
+                      dial: {windowStart: "07:50", windowEnd: "22:00", timezone: Asia/Shanghai, scheduleOutsideWindow: false}
+                      limits: {perAccountConcurrency: 1, globalConcurrency: 8, upstreamReadQps: 5, dialCooldownMs: 60000, apiQps: 100}
+                      sync: {intervalMs: 120000, pageSize: 100, lookbackDays: 7}
+                      pipeline:
+                        asr: {provider: minimax, baseUrl: 'https://api.minimax.cn', model: asr-1.0, language: zh, chunkSeconds: 420, concurrency: 2}
+                        analysis: {provider: deepseek, baseUrl: 'https://api.deepseek.com', model: deepseek-chat, escalateModel: deepseek-v4-pro, promptVersion: analysis-v1, temperature: 0.2, maxTokens: 2000, concurrency: 8}
+                        roleMapping: {method: auto, llmVerify: true}
+                      events: {sseHeartbeatMs: 15000, webhooks: []}
+                      restartRequired: false
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /accounts:
+    get:
+      tags: [accounts]
+      summary: 账号列表
+      description: |
+        账号列表 + 健康摘要，对应 docs/05 §5.1。按本地账号池分页返回 AccountSummary（docs/05 §2.2）：
+        `meta.pagination` 存在；本地统计字段 `stats` 来自本地库，非上游实时值。
+      operationId: listAccounts
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: enabled
+          in: query
+          required: false
+          description: 过滤启用状态
+          schema:
+            type: boolean
+        - name: state
+          in: query
+          required: false
+          description: 过滤账号状态（逗号分隔，如 `online,expired`；取值见 AccountState）
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Page'
+        - name: size
+          in: query
+          required: false
+          description: 每页条数（默认 20；账号数 ≤200 时可传 200）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, VALIDATION_FAILED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 账号列表（分页）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AccountSummary'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      meta:
+                        $ref: '#/components/schemas/PagedMeta'
+              examples:
+                accounts:
+                  summary: 账号列表（字段均来自 docs/05 §2.2，号码脱敏）
+                  value:
+                    ok: true
+                    data:
+                      - accountId: main
+                        displayName: 主账号
+                        upstreamUsernameMasked: "156****0075"
+                        upstreamUserId: "1001"
+                        tenantCode: "24421"
+                        enterpriseName: 示例企业
+                        realName: 坐席A
+                        dialMode: callback
+                        line:
+                          lineId: "9"
+                          lineName: 电信回拨
+                          mode: 1
+                        enabled: true
+                        state: online
+                        jwtExpiresAt: "2026-11-21T09:00:00+08:00"
+                        lastLoginAt: "2026-11-14T08:00:00+08:00"
+                        lastCheckedAt: "2026-11-14T09:59:50+08:00"
+                        lastError: null
+                        stats:
+                          totalCalls: 1073
+                          calls24h: 12
+                        createdAt: "2026-11-01T09:00:00+08:00"
+                        updatedAt: "2026-11-14T09:59:50+08:00"
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+                      pagination:
+                        page: 1
+                        size: 20
+                        total: 1
+                        totalPages: 1
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [accounts]
+      summary: 注册账号
+      description: |
+        注册本地账号，对应 docs/05 §5.2。凭证写入加密存储、不落明文，响应不回传密码/手机号明文。
+        注册后不会自动登录；需调用 POST /accounts/{accountId}/login。
+        字段非法或 `accountId` 已存在时返回 400 `VALIDATION_FAILED`（`details.fields[]` 指明非法/重复字段，docs/05 §5.2）。
+      operationId: createAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountCreateRequest'
+      x-side-effects: [writes-config, writes-encrypted-credentials, creates-browser-profile]
+      x-idempotent: false
+      x-error-codes: [UNAUTHORIZED, INVALID_REQUEST, VALIDATION_FAILED, CONFIG_INVALID, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '201':
+          description: 账号已注册
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AccountCreateResult'
+              examples:
+                created:
+                  summary: 注册成功（docs/05 §5.2 示例）
+                  value:
+                    ok: true
+                    data:
+                      accountId: main
+                      displayName: 主账号
+                      upstreamUsernameMasked: "156****0075"
+                      enabled: true
+                      state: unknown
+                      dialMode: callback
+                      createdAt: "2026-11-14T10:00:00+08:00"
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /accounts/{accountId}:
+    parameters:
+      - $ref: '#/components/parameters/PathAccountId'
+    get:
+      tags: [accounts]
+      summary: 账号详情
+      description: |
+        账号详情，对应 docs/05 §5.3。响应 `data` 为 AccountDetail（= AccountSummary + config/session/sync/recentJobs，docs/05 §2.3）。
+      operationId: getAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, ACCOUNT_NOT_FOUND, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 账号详情
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AccountDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    patch:
+      tags: [accounts]
+      summary: 更新账号
+      description: |
+        更新账号（字段均可选），请求体按 JSON Merge Patch（RFC 7386）语义局部更新，对应 docs/05 §5.4。
+        `password` 为 write-only 轮换凭证：
+        修改后清除现有会话，下次调用需重新登录（可选 `?relogin=true` 立即触发重登）。
+        `enabled=false` 停止调度与同步、保留数据；正在进行的呼出不受影响。
+      operationId: updateAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: relogin
+          in: query
+          required: false
+          description: 修改 password 后是否立即触发重新登录（默认 false）
+          schema:
+            type: boolean
+            default: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountUpdateRequest'
+      x-side-effects: [modifies-config, may-clear-session, may-trigger-relogin]
+      x-idempotent: false
+      x-error-codes: [UNAUTHORIZED, ACCOUNT_NOT_FOUND, VALIDATION_FAILED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 更新后的账号详情
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AccountDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [accounts]
+      summary: 移除账号
+      description: |
+        移除本地账号，对应 docs/05 §5.5。默认仅删除账号配置/凭证/浏览器 profile，历史数据保留
+        （标记 accountDeletedAt，列表仍可查）；`purgeData=true` 时级联删除该账号全部话单/录音/转写/事件/作业
+        （不可恢复，需同时传 `confirm=PURGE:<accountId>`），并写审计日志。
+      operationId: deleteAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: purgeData
+          in: query
+          required: false
+          description: true=删除该账号全部历史数据（不可恢复）
+          schema:
+            type: boolean
+            default: false
+        - name: confirm
+          in: query
+          required: false
+          description: '`purgeData=true` 时必填，值必须为 `PURGE:<accountId>`（条件必填，OpenAPI 3.1 无法在参数层强制表达）'
+          schema:
+            type: string
+      x-side-effects: [deletes-config, deletes-credentials, deletes-browser-profile, may-purge-history-data]
+      x-idempotent: false
+      x-error-codes: [UNAUTHORIZED, ACCOUNT_NOT_FOUND, VALIDATION_FAILED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '204':
+          description: 账号已移除（无内容）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /accounts/{accountId}/login:
+    parameters:
+      - $ref: '#/components/parameters/PathAccountId'
+    post:
+      tags: [accounts]
+      summary: 登录
+      description: |
+        触发自动登录（浏览器 + 阿里云滑块），对应 docs/05 §5.6。`wait=true`（默认）同步等待登录结果并返回
+        AccountLoginResult；`wait=false` 返回 202 受理（`data.loginJobId` + `pollUrl`）。
+        已有登录作业在跑 → 409 `ACCOUNT_LOGIN_IN_PROGRESS`（`details.loginJobId`）；
+        滑块失败/密码错误/二次验证 → 422 `ACCOUNT_LOGIN_FAILED`（`details.reason`）。
+      operationId: loginAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        description: 省略时全部字段取默认值（wait=true / timeoutMs=120000 / force=false）
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountLoginRequest'
+      x-side-effects: [starts-browser, writes-session-state, calls-upstream-login]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, ACCOUNT_NOT_FOUND, ACCOUNT_LOGIN_IN_PROGRESS, ACCOUNT_LOGIN_FAILED, UPSTREAM_UNREACHABLE, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 登录完成（wait=true）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AccountLoginResult'
+              examples:
+                loggedIn:
+                  summary: 登录成功（docs/05 §5.6 示例）
+                  value:
+                    ok: true
+                    data:
+                      accountId: main
+                      state: online
+                      loggedIn: true
+                      jwtExpiresAt: "2026-11-21T10:00:00+08:00"
+                      loginJobId: job_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+                      idempotencyReplayed: false
+        '202':
+          description: 已受理登录作业（wait=false）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AccountLoginAccepted'
+              examples:
+                accepted:
+                  summary: 异步受理（docs/05 §5.6 示例）
+                  value:
+                    ok: true
+                    data:
+                      loginJobId: job_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      status: queued
+                      pollUrl: /api/v1/jobs/job_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /accounts/{accountId}/logout:
+    parameters:
+      - $ref: '#/components/parameters/PathAccountId'
+    post:
+      tags: [accounts]
+      summary: 退出登录
+      description: |
+        清除本地会话（JWT/cookie/WS），不注销上游账号，对应 docs/05 §5.7。**天然幂等**：重复调用仍返回 204。
+      operationId: logoutAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      x-side-effects: [clears-session-state]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, ACCOUNT_NOT_FOUND, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '204':
+          description: 会话已清除（无内容；重复调用同样 204）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /accounts/{accountId}/health:
+    parameters:
+      - $ref: '#/components/parameters/PathAccountId'
+    get:
+      tags: [accounts]
+      summary: 账号健康
+      description: |
+        主动健康检查（会触发上游探测：userDetail + 线路 + WS 状态；结果缓存 30s），对应 docs/05 §5.8。
+        响应 `data` 为 AccountHealth（docs/05 §2.4）。上游探测失败时仍返回 200，
+        以 `data.upstream.reachable=false` 表达，不抛 `UPSTREAM_UNREACHABLE` 错误。
+      operationId: getAccountHealth
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, ACCOUNT_NOT_FOUND, UPSTREAM_UNREACHABLE, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 账号健康
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AccountHealth'
+              examples:
+                health:
+                  summary: 账号健康（docs/05 §5.8 示例）
+                  value:
+                    ok: true
+                    data:
+                      accountId: main
+                      state: online
+                      jwt:
+                        valid: true
+                        expiresAt: "2026-11-21T10:00:00+08:00"
+                        expiresInSec: 583200
+                      ws:
+                        connected: true
+                        lastPongAt: "2026-11-14T10:00:00+08:00"
+                        latencyMs: 47
+                      upstream:
+                        reachable: true
+                        latencyMs: 180
+                        checkedAt: "2026-11-14T10:00:00+08:00"
+                      line:
+                        lineId: "9"
+                        lineName: 电信回拨
+                        mode: 1
+                      dialWindow:
+                        open: true
+                        windowStart: "07:50"
+                        windowEnd: "22:00"
+                        timezone: Asia/Shanghai
+                        nextOpenAt: null
+                      busy:
+                        inCall: false
+                      lastError: null
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /calls:
+    get:
+      tags: [calls]
+      summary: 话单列表
+      description: |
+        话单列表（对应图中 `getOutboundList → outboundList`），对应 docs/05 §6.2。
+        返回 CallSummary[]（docs/05 §2.5）+ `meta.pagination`；多账号结果按 `accountId + upstreamCallId` 去重后聚合。
+      operationId: listCalls
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: accountId
+          in: query
+          required: false
+          description: 账号过滤（多账号聚合时可用逗号分隔）
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          description: 话单状态过滤（单个或逗号分隔，如 `connected,ended`；取值见 CallStatus）
+          schema:
+            type: string
+        - name: pipeline.audio
+          in: query
+          required: false
+          description: 按录音阶段状态过滤（取值见 PipelineStageStatus）
+          schema:
+            $ref: '#/components/schemas/PipelineStageStatus'
+        - name: pipeline.transcript
+          in: query
+          required: false
+          description: 按转写阶段状态过滤（取值见 PipelineStageStatus）
+          schema:
+            $ref: '#/components/schemas/PipelineStageStatus'
+        - name: pipeline.analysis
+          in: query
+          required: false
+          description: 按分析阶段状态过滤（取值见 PipelineStageStatus）
+          schema:
+            $ref: '#/components/schemas/PipelineStageStatus'
+        - name: hasAudio
+          in: query
+          required: false
+          description: 是否有归档录音
+          schema:
+            type: boolean
+        - name: hasTranscript
+          in: query
+          required: false
+          description: 是否有转写
+          schema:
+            type: boolean
+        - name: to
+          in: query
+          required: false
+          description: 被叫号码过滤（支持后 4 位模糊，如 `*1234`；查询串中的号码同样按脱敏值返回）
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: false
+          description: 全文搜索：客户名/号码/转写全文（≤64 字符；v1 为归一化全文 LIKE，见 docs/04）
+          schema:
+            type: string
+            maxLength: 64
+        - name: dateFrom
+          in: query
+          required: false
+          description: '`startedAt` 日期区间起（`YYYY-MM-DD`，含端点，Asia/Shanghai）；注意 `to` 已用于被叫号码'
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          required: false
+          description: '`startedAt` 日期区间止（`YYYY-MM-DD`，含端点，Asia/Shanghai）'
+          schema:
+            type: string
+            format: date
+        - name: sort
+          in: query
+          required: false
+          description: 排序：允许 `createdAt`/`dialedAt`/`endedAt`/`durationSec`，前缀 `-` 表示降序
+          schema:
+            type: string
+            pattern: '^-?(createdAt|dialedAt|endedAt|durationSec)$'
+            default: '-createdAt'
+        - $ref: '#/components/parameters/Page'
+        - name: size
+          in: query
+          required: false
+          description: 每页条数（默认 20，最大 100）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: includePipeline
+          in: query
+          required: false
+          description: 是否返回 pipeline 状态（false 时 pipeline 全为 null，减少体积）
+          schema:
+            type: boolean
+            default: true
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, VALIDATION_FAILED, DB_UNAVAILABLE, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 话单列表（分页）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CallSummary'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      meta:
+                        $ref: '#/components/schemas/PagedMeta'
+              examples:
+                calls:
+                  summary: 话单列表（docs/05 §6.2 示例，号码脱敏）
+                  value:
+                    ok: true
+                    data:
+                      - callId: call_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                        accountId: main
+                        upstreamCallId: "2121158093386702849"
+                        direction: outbound
+                        to:
+                          phone: "186****3330"
+                          location: 河北 衡水
+                        from:
+                          phone: "156****0075"
+                          location: 北京 北京
+                        lineNumber: "180****0053"
+                        customerName: null
+                        lineId: "9"
+                        lineName: 回拨专线
+                        status: ended
+                        dialedAt: "2026-11-13T16:27:58+08:00"
+                        answeredAt: "2026-11-13T16:27:58+08:00"
+                        endedAt: "2026-11-13T16:28:13+08:00"
+                        durationSec: 15
+                        cost: 0.14
+                        upstreamStatus:
+                          callStatus: 1
+                          callStatusName: 已接通
+                          finishStatus: 4
+                          finishStatusName: 其他
+                        pipeline:
+                          audio: ready
+                          transcript: ready
+                          analysis: ready
+                          lastError: null
+                        transcriptPreview: 喂。喂，李总，你好。嗯。我是看你们阿里做了很多年了…
+                        audioAvailable: true
+                        createdAt: "2026-11-13T16:27:53+08:00"
+                        updatedAt: "2026-11-13T16:30:00+08:00"
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+                      pagination:
+                        page: 1
+                        size: 20
+                        total: 1073
+                        totalPages: 54
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [calls]
+      summary: 发起呼出
+      description: |
+        发起呼出（对应图中 `Dail`），对应 docs/05 §6.1。异步受理：通过校验后进入 `pending`，
+        由调度器在拨打时段内提交上游。**回拨模式**：先振铃坐席手机（telA），坐席接听后桥接客户（telB）。
+
+        **真实副作用与计费**：每次成功提交都会产生真实外呼与上游话费；上游无幂等键，本地幂等为唯一保护，
+        客户端禁止盲目重试，失败后先 `GET /calls?to=` 核对是否已产生话单。
+
+        **校验顺序**：参数/号码格式 → 幂等键 → 账号存在且 enabled、会话健康 → 拨打时段
+        （`dialWindow.open`；`scheduleOutsideWindow=true` 时允许入队等待，否则 422）→ 同 `accountId+to`
+        防重（`dialCooldownMs`）→ 账号级并发（回拨串行）→ 上游号码查重 `getExistOther`
+        （命中不阻断，仅在 `details.warnings` 返回 `number_exists_in_crm`）。
+
+        **响应**：v1 默认同步受理返回 201（CallSummary）；保留 202 异步能力；`dryRun=true` 时返回 200
+        且不产生 Call。响应头 `Idempotency-Key` 重复请求命中时 `meta.idempotencyReplayed=true`。
+      operationId: dialCall
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DialRequest'
+      x-side-effects: [real-outbound-call, may-consume-upstream-billing, creates-call-record, enqueues-jobs]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, INVALID_REQUEST, VALIDATION_FAILED, ACCOUNT_NOT_FOUND, ACCOUNT_DISABLED, ACCOUNT_BUSY, ACCOUNT_LOGIN_REQUIRED, CALL_OUTSIDE_DIAL_WINDOW, CALL_NOT_DIALABLE, IDEMPOTENCY_CONFLICT, CALL_REJECTED_BY_UPSTREAM, UPSTREAM_AUTH_EXPIRED, UPSTREAM_UNREACHABLE, UPSTREAM_BUSINESS_ERROR, UPSTREAM_RESPONSE_INVALID, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '201':
+          description: 呼出已受理（v1 默认，data = CallAccepted（= CallSummary），status=pending）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CallAccepted'
+              examples:
+                accepted:
+                  summary: 呼出受理（docs/05 §6.1 示例，号码脱敏；data = CallAccepted = CallSummary）
+                  value:
+                    ok: true
+                    data:
+                      callId: call_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      accountId: main
+                      upstreamCallId: null
+                      direction: outbound
+                      to:
+                        phone: "138****0000"
+                      from:
+                        phone: "156****0075"
+                      status: pending
+                      statusReason: 等待调度
+                      pipeline:
+                        audio: pending
+                        transcript: pending
+                        analysis: pending
+                      audioAvailable: false
+                      createdAt: "2026-11-14T10:05:00+08:00"
+                      updatedAt: "2026-11-14T10:05:00+08:00"
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:05:00+08:00"
+                      idempotencyReplayed: false
+        '200':
+          description: dryRun 校验结果（dryRun=true，不产生 Call）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DryRunResult'
+              examples:
+                dryRun:
+                  summary: dryRun 校验（docs/05 §6.1 示例，号码脱敏）
+                  value:
+                    ok: true
+                    data:
+                      dryRun: true
+                      willDial: true
+                      accountId: main
+                      to: "138****0000"
+                      dialWindow:
+                        open: true
+                        windowStart: "07:50"
+                        windowEnd: "22:00"
+                        timezone: Asia/Shanghai
+                      warnings: [number_exists_in_crm]
+                      estimatedCost: null
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:05:00+08:00"
+        '202':
+          description: 已受理（服务端选择异步提交时保留能力；data = CallAccepted（= CallSummary），docs/05 §2.14）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CallAccepted'
+              examples:
+                asyncAccepted:
+                  summary: 异步受理（docs/05 §6.1 示例）
+                  value:
+                    ok: true
+                    data:
+                      callId: call_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      accountId: main
+                      upstreamCallId: null
+                      direction: outbound
+                      to:
+                        phone: "138****0000"
+                      from:
+                        phone: "156****0075"
+                      status: pending
+                      statusReason: 等待调度
+                      pipeline:
+                        audio: pending
+                        transcript: pending
+                        analysis: pending
+                      audioAvailable: false
+                      createdAt: "2026-11-14T10:05:00+08:00"
+                      updatedAt: "2026-11-14T10:05:00+08:00"
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:05:00+08:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /calls/{callId}:
+    parameters:
+      - $ref: '#/components/parameters/PathCallId'
+    get:
+      tags: [calls]
+      summary: 话单摘要
+      description: |
+        单通话单摘要（对应图中 `Dial Status`），对应 docs/05 §6.3。响应 `data` 为 CallSummary（docs/05 §2.5）。
+        回拨模式下受理成功 ≠ 客户已接通，客户端应轮询本接口或订阅 SSE 等待 `connected`/`no_answer`/`ended`。
+      operationId: getCall
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, CALL_NOT_FOUND, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 话单摘要
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CallSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /calls/{callId}/detail:
+    parameters:
+      - $ref: '#/components/parameters/PathCallId'
+    get:
+      tags: [calls]
+      summary: 话单详情
+      description: |
+        话单详情（对应图中 `getOutboundDetail → outboundDetail`），对应 docs/05 §6.4。
+        响应 `data` 为 CallDetail（= CallSummary + upstream/timeline/pipelineDetail/recording/transcript/analysis，
+        docs/05 §2.9）。`?includeRaw=true` 时 `data.upstream.raw` 返回上游原始对象；
+        `?includeEvents=true` 时 `data.events` 内联最近 50 条事件；`?includeAnalysis=true` 时
+        `data.analysisPayload` 返回完整 AnalysisPayload（含 promptVersion/usage）。
+      operationId: getCallDetail
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: includeRaw
+          in: query
+          required: false
+          description: 是否返回上游原始对象 `upstream.raw`（体积大，调试用）
+          schema:
+            type: boolean
+            default: false
+        - name: includeEvents
+          in: query
+          required: false
+          description: 是否内联最近 50 条事件（`data.events`）
+          schema:
+            type: boolean
+            default: false
+        - name: includeAnalysis
+          in: query
+          required: false
+          description: 是否返回完整 AI 后处理产出（`data.analysisPayload`，含 promptVersion/usage）
+          schema:
+            type: boolean
+            default: false
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, CALL_NOT_FOUND, DB_UNAVAILABLE, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 话单详情
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CallDetail'
+              examples:
+                detail:
+                  summary: 话单详情（docs/05 §6.4 示例，号码/哈希已截断脱敏）
+                  value:
+                    ok: true
+                    data:
+                      callId: call_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      accountId: main
+                      upstreamCallId: "2121158093386702849"
+                      direction: outbound
+                      to:
+                        phone: "186****3330"
+                        location: 河北 衡水
+                      from:
+                        phone: "156****0075"
+                        location: 北京 北京
+                      lineNumber: "180****0053"
+                      customerName: null
+                      lineId: "9"
+                      lineName: 回拨专线
+                      status: ended
+                      statusReason: null
+                      dialedAt: "2026-11-13T16:27:58+08:00"
+                      answeredAt: "2026-11-13T16:27:58+08:00"
+                      endedAt: "2026-11-13T16:28:13+08:00"
+                      durationSec: 15
+                      cost: 0.14
+                      pipeline:
+                        audio: ready
+                        transcript: ready
+                        analysis: ready
+                        lastError: null
+                      audioAvailable: true
+                      upstream:
+                        callStatusName: 已接通
+                        finishStatus: 4
+                        finishStatusName: 其他
+                        callType: 1
+                        handle: 1
+                        interfaceId: "9"
+                        interfaceName: 电信回拨
+                        telA: "156****0075"
+                        telB: "186****3330"
+                        telX: "180****0053"
+                        postage: 0.14
+                        agentCode: 1058
+                        sipCodeResult: null
+                        callerAttr: 北京 北京
+                        calleeAttr: 河北 衡水
+                        tenantCode: "24421"
+                        enterpriseName: 示例企业
+                      timeline:
+                        createdAt: "2026-11-13T16:27:53+08:00"
+                        submittedAt: "2026-11-13T16:27:56+08:00"
+                        dialingAt: "2026-11-13T16:27:56+08:00"
+                        connectedAt: "2026-11-13T16:27:58+08:00"
+                        endedAt: "2026-11-13T16:28:13+08:00"
+                      pipelineDetail:
+                        audio:
+                          status: ready
+                          audioId: aud_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                          downloadedAt: "2026-11-13T16:29:10+08:00"
+                        transcript:
+                          status: ready
+                          transcriptId: tr_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                          source: asr
+                          provider: "minimax:asr-1.0"
+                          chunkCount: 1
+                          needsReview: false
+                          generatedAt: "2026-11-13T16:28:40+08:00"
+                        analysis:
+                          status: ready
+                          analysisId: ana_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                          generatedAt: "2026-11-13T16:30:00+08:00"
+                      recording:
+                        available: true
+                        downloadUrl: /api/v1/calls/call_01J8Z3K5T9QW2M4R7X1C6V0B8N/audio
+                        format: wav
+                        durationMs: 15060
+                        sizeBytes: 481964
+                        sha256: "ab12…"
+                        sampleRate: 16000
+                        channels: 1
+                      transcript:
+                        available: true
+                        source: asr
+                        segmentCount: 7
+                        needsReview: false
+                        url: /api/v1/calls/call_01J8Z3K5T9QW2M4R7X1C6V0B8N/transcript
+                      analysis:
+                        available: true
+                        analysisId: ana_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                        summary: 客户为外贸公司负责人，对客户管理系统有初步兴趣。
+                        intent: medium
+                        url: /api/v1/calls/call_01J8Z3K5T9QW2M4R7X1C6V0B8N/transcript?includeAnalysis=true
+                      eventsCount: 6
+                      metadata: {}
+                      createdAt: "2026-11-13T16:27:53+08:00"
+                      updatedAt: "2026-11-13T16:30:00+08:00"
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /calls/{callId}/transcript:
+    parameters:
+      - $ref: '#/components/parameters/PathCallId'
+    get:
+      tags: [calls]
+      summary: 转写
+      description: |
+        转写全文 + 分段，对应 docs/05 §6.5。响应 `data` 为 TranscriptPayload（docs/05 §2.9）。
+        客户端建议先查 `GET /calls/{callId}/detail` 的 `pipeline.transcript` 状态，`ready` 后再取，避免 409。
+        处理中返回 409 `TRANSCRIPT_PENDING`（`details.stage`：`asr_queued`/`asr_running`/`role_mapping`/`analysis`）；
+        无转写且本地 ASR 不可用/失败返回 422 `TRANSCRIPT_NOT_AVAILABLE`。
+      operationId: getCallTranscript
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: includeAnalysis
+          in: query
+          required: false
+          description: 附带 AI 后处理结果（`data.analysis`）
+          schema:
+            type: boolean
+            default: false
+        - name: format
+          in: query
+          required: false
+          description: v1 固定 `json`（预留 `text`/`srt`）
+          schema:
+            type: string
+            enum: [json]
+            default: json
+        - name: version
+          in: query
+          required: false
+          description: '`current` 或 transcriptId（历史版本，v1 预留）'
+          schema:
+            type: string
+            default: current
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, CALL_NOT_FOUND, NOT_FOUND, TRANSCRIPT_NOT_AVAILABLE, TRANSCRIPT_PENDING, DB_UNAVAILABLE, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 转写（TranscriptPayload）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TranscriptPayload'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /calls/{callId}/audio:
+    parameters:
+      - $ref: '#/components/parameters/PathCallId'
+    get:
+      tags: [calls]
+      summary: 录音文件
+      description: |
+        原始录音（WAV 16kHz/16bit/mono），对应 docs/05 §6.6。成功返回 `audio/wav` 二进制；
+        支持 `Range: bytes=0-1023` → 206 Partial Content + `Content-Range`。
+        `?download=true` 附加 `Content-Disposition: attachment; filename="<callId>.wav"`。
+        录音未生成/下载中 → 409 `AUDIO_NOT_READY`（响应头 `Retry-After: 10`）；
+        无录音 → 422 `AUDIO_NOT_AVAILABLE`；文件丢失 → 404 `NOT_FOUND`（同时推 `call.audio.failed` 事件并触发重下）。
+      operationId: downloadCallAudio
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: download
+          in: query
+          required: false
+          description: 'true 时附加 `Content-Disposition: attachment`'
+          schema:
+            type: boolean
+            default: false
+        - name: Range
+          in: header
+          required: false
+          description: 字节范围请求（如 `bytes=0-1023`），命中返回 206
+          schema:
+            type: string
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, CALL_NOT_FOUND, NOT_FOUND, AUDIO_NOT_AVAILABLE, AUDIO_NOT_READY, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: WAV 录音（二进制）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+            Content-Length:
+              $ref: '#/components/headers/ContentLength'
+            Accept-Ranges:
+              $ref: '#/components/headers/AcceptRanges'
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: 部分内容（Range 请求）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+            Content-Range:
+              $ref: '#/components/headers/ContentRange'
+            Accept-Ranges:
+              $ref: '#/components/headers/AcceptRanges'
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /calls/{callId}/reprocess:
+    parameters:
+      - $ref: '#/components/parameters/PathCallId'
+    post:
+      tags: [calls]
+      summary: 重跑流水线
+      description: |
+        重跑流水线阶段（audio/transcript/analysis），不改变 Call.status，对应 docs/05 §6.7。
+        幂等：同一 call 同时只允许一个 reprocess 作业，重复请求可返回已有 jobId（`meta.idempotencyReplayed=true`）；
+        已有一条 reprocess 在跑时返回 429 `RATE_LIMITED`（`details.reason=reprocess_in_progress`）。
+        终态/取消状态话单不允许重跑 → 409 `CALL_ALREADY_TERMINAL`。响应 202 为作业受理
+        （`data` 至少含 `jobId`/`status`/`pollUrl`）。
+      operationId: reprocessCall
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReprocessRequest'
+            examples:
+              rerunTranscriptAndAnalysis:
+                summary: 重跑转写与分析（字段来自 docs/05 §6.7）
+                value:
+                  stages: [transcript, analysis]
+                  force: false
+      x-side-effects: [re-runs-media-pipeline, enqueues-jobs]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, CALL_NOT_FOUND, CALL_ALREADY_TERMINAL, VALIDATION_FAILED, RATE_LIMITED, INTERNAL_ERROR, SERVICE_UNAVAILABLE]
+      responses:
+        '202':
+          description: 已受理重跑作业
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ReprocessAccepted'
+              examples:
+                accepted:
+                  summary: 重跑受理（docs/05 §6.7 示例）
+                  value:
+                    ok: true
+                    data:
+                      jobId: job_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      callId: call_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      stages: [transcript, analysis]
+                      status: queued
+                      pollUrl: /api/v1/jobs/job_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /calls/{callId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/PathCallId'
+    post:
+      tags: [calls]
+      summary: 取消呼出
+      description: |
+        仅取消本地尚未提交上游的呼出（`pending`），对应 docs/05 §6.8。已提交上游（`dialing`+）不可取消
+        （上游无取消接口）→ 409 `CALL_NOT_CANCELABLE`；终态话单 → 409 `CALL_ALREADY_TERMINAL`。
+        成功返回 `data: CallSummary`（status=`canceled`）。
+      operationId: cancelCall
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      x-side-effects: [cancels-pending-call]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, CALL_NOT_FOUND, CALL_NOT_CANCELABLE, CALL_ALREADY_TERMINAL, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 已取消（data = CallSummary，status=canceled）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CallSummary'
+              examples:
+                canceled:
+                  summary: 取消成功（字段来自 docs/05 §2.5，号码脱敏）
+                  value:
+                    ok: true
+                    data:
+                      callId: call_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      accountId: main
+                      upstreamCallId: null
+                      direction: outbound
+                      to:
+                        phone: "138****0000"
+                      from:
+                        phone: "156****0075"
+                      status: canceled
+                      statusReason: 本地取消
+                      pipeline:
+                        audio: pending
+                        transcript: pending
+                        analysis: pending
+                      audioAvailable: false
+                      createdAt: "2026-11-14T10:05:00+08:00"
+                      updatedAt: "2026-11-14T10:06:00+08:00"
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:06:00+08:00"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /calls/{callId}/events:
+    parameters:
+      - $ref: '#/components/parameters/PathCallId'
+    get:
+      tags: [calls]
+      summary: 话单事件
+      description: |
+        单通话单事件时间线，对应 docs/05 §6.9。返回 EventRecord[]（docs/05 §2.12）+ `meta.pagination`；
+        `sort` 固定 `occurredAt asc`。
+      operationId: listCallEvents
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: types
+          in: query
+          required: false
+          description: 事件类型过滤（逗号分隔，如 `call.connected,call.ended`；取值见 docs/01 §7.3）
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Page'
+        - name: size
+          in: query
+          required: false
+          description: 每页条数（默认 50，最大 200）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: sort
+          in: query
+          required: false
+          description: 固定 `occurredAt asc`（仅支持时间正序）
+          schema:
+            type: string
+            enum: ['occurredAt asc']
+            default: 'occurredAt asc'
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, CALL_NOT_FOUND, VALIDATION_FAILED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 话单事件列表（分页）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/EventRecord'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      meta:
+                        $ref: '#/components/schemas/PagedMeta'
+              examples:
+                events:
+                  summary: 单通话单事件（事件封套来自 docs/01 §7.3）
+                  value:
+                    ok: true
+                    data:
+                      - eventId: evt_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                        type: call.connected
+                        occurredAt: "2026-11-14T10:03:12+08:00"
+                        accountId: main
+                        callId: call_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                        data:
+                          answeredAt: "2026-11-14T10:03:12+08:00"
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:05:00+08:00"
+                      pagination:
+                        page: 1
+                        size: 50
+                        total: 1
+                        totalPages: 1
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /sync:
+    post:
+      tags: [sync]
+      summary: 触发同步
+      description: |
+        触发同步作业（增量/全量/回填），对应 docs/05 §7.1。幂等：相同 `mode+accountId` 在 10s 内
+        重复触发会合并/返回同一 jobId。`wait=true` 时同步等待作业结束（上限 `timeoutMs`），完成返回 200 + JobDetail；
+        否则返回 202 受理。全部账号都不可达时返回 502 `UPSTREAM_UNREACHABLE`；
+        无有效会话返回 400 `ACCOUNT_LOGIN_REQUIRED`（`details.accounts[]`）。
+        `mode=full` 完成后会自动为历史话单入队 asr/analysis 作业（全量回补，不设预算上限但记录用量，进度见 /jobs）。
+      operationId: startSync
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncRequest'
+            examples:
+              incremental:
+                summary: 增量同步全部启用账号（字段来自 docs/05 §7.1）
+                value:
+                  mode: incremental
+                  wait: false
+      x-side-effects: [fetches-upstream-data, enqueues-jobs, writes-local-db]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, VALIDATION_FAILED, ACCOUNT_NOT_FOUND, ACCOUNT_LOGIN_REQUIRED, UPSTREAM_UNREACHABLE, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '202':
+          description: 已受理同步作业
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SyncAccepted'
+              examples:
+                accepted:
+                  summary: 同步受理（docs/05 §7.1 示例）
+                  value:
+                    ok: true
+                    data:
+                      jobId: job_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      type: sync
+                      mode: incremental
+                      accountId: null
+                      status: queued
+                      pollUrl: /api/v1/jobs/job_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '200':
+          description: 同步完成（wait=true；data = JobDetail）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/JobDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags: [sync]
+      summary: 同步作业列表
+      description: |
+        最近同步作业列表（`type=sync`），对应 docs/05 §7.2。返回 JobSummary[] + pagination。
+      operationId: listSyncJobs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: accountId
+          in: query
+          required: false
+          description: 账号过滤
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          description: 作业状态过滤（逗号分隔；取值见 JobStatus）
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Page'
+        - name: size
+          in: query
+          required: false
+          description: 每页条数（默认 20，最大 100）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, VALIDATION_FAILED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 同步作业列表（分页）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/JobSummary'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      meta:
+                        $ref: '#/components/schemas/PagedMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /sync/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/PathJobId'
+    get:
+      tags: [sync]
+      summary: 同步作业详情
+      description: |
+        同步作业详情/进度，对应 docs/05 §7.3。响应 `data` 为 JobDetail（docs/05 §2.7）。
+      operationId: getSyncJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, JOB_NOT_FOUND, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 同步作业详情
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/JobDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /jobs:
+    get:
+      tags: [jobs]
+      summary: 作业列表
+      description: |
+        全部后台作业列表（可按类型/状态过滤），对应 docs/05 §7.4。返回 JobSummary[] + pagination（默认 1/20，≤100）。
+        作业类型见 JobType；登录、同步、录音、ASR（转写）、分析、重跑、回填共用该列表。
+      operationId: listJobs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: type
+          in: query
+          required: false
+          description: 作业类型过滤（逗号分隔；取值见 JobType）
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          description: 作业状态过滤（逗号分隔；取值见 JobStatus）
+          schema:
+            type: string
+        - name: accountId
+          in: query
+          required: false
+          description: 账号过滤
+          schema:
+            type: string
+        - name: callId
+          in: query
+          required: false
+          description: 话单过滤
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Page'
+        - name: size
+          in: query
+          required: false
+          description: 每页条数（默认 20，最大 100）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: 排序（默认 `-createdAt`，前缀 `-` 降序）
+          schema:
+            type: string
+            default: '-createdAt'
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, VALIDATION_FAILED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 作业列表（分页）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/JobSummary'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      meta:
+                        $ref: '#/components/schemas/PagedMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /jobs/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/PathJobId'
+    get:
+      tags: [jobs]
+      summary: 作业详情
+      description: |
+        作业详情，对应 docs/05 §7.5。响应 `data` 为 JobDetail（含 payload/result/logs，均脱敏）。
+      operationId: getJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, JOB_NOT_FOUND, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 作业详情
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/JobDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /events:
+    get:
+      tags: [events]
+      summary: 事件查询
+      description: |
+        事件历史查询（分页/过滤），对应 docs/05 §7.6。返回 EventRecord[]（docs/05 §2.12）+ pagination。
+        `types` 支持前缀通配（如 `call.*`）；`since`/`until` 为 `occurredAt` 区间（ISO 8601）。
+      operationId: listEvents
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: types
+          in: query
+          required: false
+          description: 事件类型过滤（逗号分隔，支持前缀通配 `call.*`；取值见 docs/01 §7.3）
+          schema:
+            type: string
+        - name: callId
+          in: query
+          required: false
+          description: 话单过滤
+          schema:
+            type: string
+        - name: accountId
+          in: query
+          required: false
+          description: 账号过滤
+          schema:
+            type: string
+        - name: since
+          in: query
+          required: false
+          description: '`occurredAt` 区间起（ISO 8601 带时区）'
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          required: false
+          description: '`occurredAt` 区间止（ISO 8601 带时区）'
+          schema:
+            type: string
+            format: date-time
+        - $ref: '#/components/parameters/Page'
+        - name: size
+          in: query
+          required: false
+          description: 每页条数（默认 50，最大 200）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: sort
+          in: query
+          required: false
+          description: 仅支持时间排序（`-occurredAt` 降序 / `occurredAt` 升序）
+          schema:
+            type: string
+            enum: ['-occurredAt', occurredAt]
+            default: '-occurredAt'
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, VALIDATION_FAILED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 事件列表（分页）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/EventRecord'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      meta:
+                        $ref: '#/components/schemas/PagedMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /events/stream:
+    get:
+      tags: [events]
+      summary: SSE 事件流
+      description: |
+        SSE 事件流（长连接），对应 docs/05 §7.7。HTTP 头：`Content-Type: text/event-stream`、
+        `Cache-Control: no-cache`、`Connection: keep-alive`；每 15s 发送 `: ping` 保活。
+        建连后不回放历史：客户端先用 `GET /events?since=` 补齐，再带 `Last-Event-ID` 续传；
+        若该事件已不可得，服务端发送 `event: stream.reset` 提示重新拉历史。断线按指数退避重连（1s→30s）。
+        认证在 SSE 建连前校验；失败返回 401 `UNAUTHORIZED`。
+      operationId: streamEvents
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: types
+          in: query
+          required: false
+          description: 事件类型过滤（逗号分隔，支持前缀通配 `call.*`）
+          schema:
+            type: string
+        - name: accountId
+          in: query
+          required: false
+          description: 账号过滤
+          schema:
+            type: string
+        - name: callId
+          in: query
+          required: false
+          description: 话单过滤
+          schema:
+            type: string
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: 续传游标（最近一次收到的事件 eventId）；缺省从当前时刻开始推送
+          schema:
+            type: string
+      x-side-effects: [long-lived-connection]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: SSE 事件流（长连接）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            Connection:
+              $ref: '#/components/headers/Connection'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: 'SSE 文本帧（`event:`/`id:`/`data:` 行 + 每 15s `: ping` 注释行）'
+              examples:
+                stream:
+                  summary: SSE 帧格式（docs/05 §7.7 示例）
+                  value: |
+                    event: call.connected
+                    id: evt_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                    data: {"eventId":"evt_01J8Z3K5T9QW2M4R7X1C6V0B8N","type":"call.connected","occurredAt":"2026-11-14T10:03:12+08:00","accountId":"main","callId":"call_01J8Z3K5T9QW2M4R7X1C6V0B8N","data":{"answeredAt":"2026-11-14T10:03:12+08:00"}}
+
+                    : ping
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /webhooks/test:
+    post:
+      tags: [webhooks]
+      summary: 测试 webhook
+      description: |
+        测试 webhook 出站配置（v1 可选），对应 docs/05 §7.8。`url` 必须为 https；
+        未配置 webhook 时返回 400 `VALIDATION_FAILED`（`details.reason=no_webhook_configured`）；
+        投递失败返回 502 `UPSTREAM_UNREACHABLE`（`details.deliveryError`）。
+      operationId: testWebhook
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookTestRequest'
+            examples:
+              test:
+                summary: 测试 webhook 投递（docs/05 §7.8 示例）
+                value:
+                  url: https://example.com/hook
+                  eventType: call.ended
+      x-side-effects: [sends-test-webhook-request]
+      x-idempotent: false
+      x-error-codes: [UNAUTHORIZED, VALIDATION_FAILED, UPSTREAM_UNREACHABLE, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 测试投递结果
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/WebhookTestResult'
+              examples:
+                delivered:
+                  summary: 投递成功（docs/05 §7.8 示例）
+                  value:
+                    ok: true
+                    data:
+                      delivered: true
+                      statusCode: 200
+                      latencyMs: 120
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /terms:
+    get:
+      tags: [terms]
+      summary: 词表列表
+      description: |
+        词表规则列表，对应 docs/05 §7.9。返回 TermRule[] + pagination（默认 1/50，最大 500）。
+        `q` 匹配 from/to，`category` 取值 company/product/person/custom。
+      operationId: listTerms
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: q
+          in: query
+          required: false
+          description: 模糊匹配 from/to
+          schema:
+            type: string
+        - name: category
+          in: query
+          required: false
+          description: 分类过滤
+          schema:
+            type: string
+            enum: [company, product, person, custom]
+        - name: enabled
+          in: query
+          required: false
+          description: 启用状态过滤
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/Page'
+        - name: size
+          in: query
+          required: false
+          description: 每页条数（默认 50，最大 500）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 50
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, VALIDATION_FAILED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 词表列表（分页）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TermRule'
+                  - type: object
+                    required: [meta]
+                    properties:
+                      meta:
+                        $ref: '#/components/schemas/PagedMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags: [terms]
+      summary: 全量替换词表
+      description: |
+        全量替换（导入）词表，对应 docs/05 §7.9。校验全部规则（`from` 非空、`to` 非空、`to` 不得出现在
+        自身 `from` 中、全局冲突按 priority 高者生效）后原子替换（事务）。天然幂等：重复写入等价。
+        校验失败返回 400 `VALIDATION_FAILED`（`details.fields[]` 指出第几条规则哪项非法）。
+      operationId: replaceTerms
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TermReplaceRequest'
+            examples:
+              import:
+                summary: 全量导入（字段来自 docs/05 §2.10/§7.9）
+                value:
+                  mode: replace
+                  rules:
+                    - from: [复萌, 福梦, 复盟]
+                      to: 孚盟
+                      category: company
+                      priority: 100
+                      enabled: true
+      x-side-effects: [overwrites-term-rules]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, VALIDATION_FAILED, IDEMPOTENCY_CONFLICT, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 替换结果（规则数量 + 词表版本）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TermReplaceResult'
+              examples:
+                replaced:
+                  summary: 全量替换（docs/05 §7.9 示例）
+                  value:
+                    ok: true
+                    data:
+                      count: 42
+                      version: "2026-11-14T10:00:00+08:00"
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [terms]
+      summary: 新增词条
+      description: |
+        新增单条词表规则，对应 docs/05 §7.9。请求体为 TermRuleInput（docs/05 §2.10）；
+        响应 201 返回完整 TermRule（含 termId/createdAt/updatedAt）。冲突/格式非法 → 400 `VALIDATION_FAILED`。
+      operationId: createTerm
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TermRuleInput'
+            examples:
+              companyTerm:
+                summary: 新增公司名归一规则（字段来自 docs/05 §2.10）
+                value:
+                  from: [复萌, 福梦]
+                  to: 孚盟
+                  category: company
+                  priority: 100
+                  enabled: true
+                  caseSensitive: false
+      x-side-effects: [writes-term-rules]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, VALIDATION_FAILED, IDEMPOTENCY_CONFLICT, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '201':
+          description: 创建后的词条
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TermRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /terms/{termId}:
+    parameters:
+      - $ref: '#/components/parameters/PathTermId'
+    patch:
+      tags: [terms]
+      summary: 修改词条
+      description: |
+        修改词条（TermRuleInput 的部分字段），对应 docs/05 §7.9。termId 不存在 → 404 `TERM_NOT_FOUND`；
+        校验规则同新增。响应 `data` 为更新后的 TermRule。
+      operationId: updateTerm
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TermRuleInputPatch'
+            examples:
+              reprioritize:
+                summary: 调整优先级（字段来自 docs/05 §2.10）
+                value:
+                  priority: 200
+      x-side-effects: [writes-term-rules]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, TERM_NOT_FOUND, VALIDATION_FAILED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 更新后的词条
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TermRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [terms]
+      summary: 删除词条
+      description: |
+        删除词条，对应 docs/05 §7.9。成功 204；termId 不存在 → 404 `TERM_NOT_FOUND`
+        （v1 语义：不存在则 404 以便发现拼写错误，而非幂等 204）。
+      operationId: deleteTerm
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      x-side-effects: [deletes-term-rules]
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, TERM_NOT_FOUND, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '204':
+          description: 已删除（无内容）
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /text/normalize:
+    post:
+      tags: [text]
+      summary: 文本归一化
+      description: |
+        文本归一化（同步、无副作用；可用于 agent 预处理），对应 docs/05 §7.9。
+        请求体 NormalizeRequest（`text` 1–20000 字符）；响应 NormalizeResponse（原文/归一化文本/命中规则/词表版本）。
+        超长或空文本 → 400 `VALIDATION_FAILED`。
+      operationId: normalizeText
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NormalizeRequest'
+            examples:
+              normalize:
+                summary: 归一化示例（docs/05 §7.9 示例）
+                value:
+                  text: 复萌那边说福梦的系统不错
+                  options:
+                    includeUnchanged: false
+      x-side-effects: []
+      x-idempotent: true
+      x-error-codes: [UNAUTHORIZED, VALIDATION_FAILED, INTERNAL_ERROR, RATE_LIMITED, SERVICE_UNAVAILABLE]
+      responses:
+        '200':
+          description: 归一化结果
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/XRequestId'
+            X-Api-Version:
+              $ref: '#/components/headers/XApiVersion'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/NormalizeResult'
+              examples:
+                normalized:
+                  summary: 归一化结果（docs/05 §7.9 示例）
+                  value:
+                    ok: true
+                    data:
+                      original: 复萌那边说福梦的系统不错
+                      normalized: 孚盟那边说孚盟的系统不错
+                      applied:
+                        - from: 复萌
+                          to: 孚盟
+                          count: 1
+                        - from: 福梦
+                          to: 孚盟
+                          count: 1
+                      rulesVersion: "2026-11-14T10:00:00+08:00"
+                    meta:
+                      requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                      ts: "2026-11-14T10:00:00+08:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: localApiToken
+      description: |
+        本地 API token（`Authorization: Bearer <localApiToken>`）。token 存于
+        `~/.config/feige-outbound/api-token`（0600），首次启动生成；缺失/错误返回 401 `UNAUTHORIZED`。
+        登录态 JWT 是上游会话凭证，绝不作为本 API 的认证 token。
+
+  parameters:
+    XRequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: 客户端可传，响应原样回传；否则服务端生成 `req_<ULID>`（docs/05 §1.1）
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        幂等键（UUID/ULID）。相同键 + 相同请求体在 24h 内返回首次结果（`meta.idempotencyReplayed=true`）；
+        相同键 + 不同请求体 → 409 `IDEMPOTENCY_CONFLICT`。适用写接口见 docs/05 §9。
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+    Page:
+      name: page
+      in: query
+      required: false
+      description: 页码（1 起）
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PathAccountId:
+      name: accountId
+      in: path
+      required: true
+      description: 账号 slug（`^[a-z0-9][a-z0-9_-]{1,31}$`），如 `main`
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9_-]{1,31}$'
+    PathCallId:
+      name: callId
+      in: path
+      required: true
+      description: 本地话单 ID（`call_<ULID>`）
+      schema:
+        type: string
+    PathJobId:
+      name: jobId
+      in: path
+      required: true
+      description: 本地作业 ID（`job_<ULID>`）
+      schema:
+        type: string
+    PathTermId:
+      name: termId
+      in: path
+      required: true
+      description: 词表规则 ID（`term_<ULID>`）
+      schema:
+        type: string
+
+  headers:
+    XRequestId:
+      description: 请求追踪 ID（客户端传入则原样回传，否则服务端生成 `req_<ULID>`）
+      schema:
+        type: string
+      example: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+    XApiVersion:
+      description: API 版本，固定 `1`
+      schema:
+        type: string
+        enum: ['1']
+      example: '1'
+    ContentLength:
+      description: 文件字节数
+      schema:
+        type: integer
+        minimum: 0
+    AcceptRanges:
+      description: 支持的范围请求单位，固定 `bytes`
+      schema:
+        type: string
+        enum: [bytes]
+    ETag:
+      description: 录音内容摘要（`"<sha256>"`）
+      schema:
+        type: string
+    CacheControl:
+      description: 缓存策略
+      schema:
+        type: string
+      example: private, max-age=86400
+    ContentRange:
+      description: 部分内容范围，如 `bytes 0-1023/481964`
+      schema:
+        type: string
+    Connection:
+      description: 连接保持（SSE 长连接）
+      schema:
+        type: string
+        enum: [keep-alive]
+    RetryAfter:
+      description: 建议重试等待时间（秒）
+      schema:
+        type: integer
+        minimum: 0
+
+  responses:
+    BadRequest:
+      description: 请求非法/参数校验失败（`INVALID_REQUEST` / `VALIDATION_FAILED` / `CONFIG_INVALID`）
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-Api-Version:
+          $ref: '#/components/headers/XApiVersion'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validationFailed:
+              summary: 字段校验失败（details.fields 见 docs/01 §5.4）
+              value:
+                ok: false
+                error:
+                  code: VALIDATION_FAILED
+                  message: 请求参数校验失败
+                  retryable: false
+                  details:
+                    fields:
+                      - field: to
+                        reason: 号码格式非法
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T10:00:00+08:00"
+
+    Unauthorized:
+      description: 未认证/本地 API token 缺失或错误（`UNAUTHORIZED`）
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-Api-Version:
+          $ref: '#/components/headers/XApiVersion'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unauthorized:
+              summary: 未认证
+              value:
+                ok: false
+                error:
+                  code: UNAUTHORIZED
+                  message: 本地 API token 缺失或错误
+                  retryable: false
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T10:00:00+08:00"
+
+    Forbidden:
+      description: 被禁止（账号停用/远程访问策略禁止；`ACCOUNT_DISABLED` / `FORBIDDEN`）
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-Api-Version:
+          $ref: '#/components/headers/XApiVersion'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            accountDisabled:
+              summary: 账号已停用
+              value:
+                ok: false
+                error:
+                  code: ACCOUNT_DISABLED
+                  message: 账号已停用
+                  retryable: false
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T10:00:00+08:00"
+
+    NotFound:
+      description: 资源不存在（`NOT_FOUND` / `CALL_NOT_FOUND` / `ACCOUNT_NOT_FOUND` / `JOB_NOT_FOUND` / `TERM_NOT_FOUND`）
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-Api-Version:
+          $ref: '#/components/headers/XApiVersion'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            callNotFound:
+              summary: 话单不存在
+              value:
+                ok: false
+                error:
+                  code: CALL_NOT_FOUND
+                  message: 话单不存在
+                  retryable: false
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T10:00:00+08:00"
+
+    Conflict:
+      description: 状态冲突/幂等冲突（`CALL_ALREADY_TERMINAL` / `CALL_NOT_CANCELABLE` / `IDEMPOTENCY_CONFLICT` / `ACCOUNT_BUSY` / `ACCOUNT_LOGIN_IN_PROGRESS` 等）
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-Api-Version:
+          $ref: '#/components/headers/XApiVersion'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            idempotencyConflict:
+              summary: 幂等键冲突
+              value:
+                ok: false
+                error:
+                  code: IDEMPOTENCY_CONFLICT
+                  message: 相同幂等键但请求体不同
+                  retryable: false
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T10:00:00+08:00"
+
+    UnprocessableEntity:
+      description: 语义可解析但业务不允许（如 `CALL_OUTSIDE_DIAL_WINDOW` / `CALL_REJECTED_BY_UPSTREAM` / `CALL_NOT_DIALABLE` / `AUDIO_NOT_AVAILABLE` / `TRANSCRIPT_NOT_AVAILABLE`）
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-Api-Version:
+          $ref: '#/components/headers/XApiVersion'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            outsideDialWindow:
+              summary: 拨打时段外（docs/05 §6.1 示例）
+              value:
+                ok: false
+                error:
+                  code: CALL_OUTSIDE_DIAL_WINDOW
+                  message: 当前不在可拨号时段（07:50–22:00，Asia/Shanghai）
+                  retryable: true
+                  retryAfter: "2026-11-15T07:50:00+08:00"
+                  details:
+                    upstreamCode: 10056
+                    upstreamMessage: 拨打时间段在7:50-22:00之间
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T22:42:19+08:00"
+
+    TooManyRequests:
+      description: 触发本地限流（`RATE_LIMITED`；docs/05 §8：**429 适用于全部接口**；`Retry-After` 给出建议重试秒数）
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-Api-Version:
+          $ref: '#/components/headers/XApiVersion'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            rateLimited:
+              summary: 本地限流
+              value:
+                ok: false
+                error:
+                  code: RATE_LIMITED
+                  message: 请求频率超限，请稍后重试
+                  retryable: true
+                  details:
+                    retryAfterMs: 1000
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T10:00:00+08:00"
+
+    BadGateway:
+      description: 上游不可达/返回错误/不可解析（`UPSTREAM_UNREACHABLE` / `UPSTREAM_BUSINESS_ERROR` / `UPSTREAM_RESPONSE_INVALID`），docs/01 §5.4 统一 502
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-Api-Version:
+          $ref: '#/components/headers/XApiVersion'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            upstreamBusinessError:
+              summary: 上游业务拒绝
+              value:
+                ok: false
+                error:
+                  code: UPSTREAM_BUSINESS_ERROR
+                  message: 上游拒绝本次请求
+                  retryable: false
+                  details:
+                    upstreamCode: 10056
+                    upstreamMessage: 用户未绑定中间号
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T10:00:00+08:00"
+            upstreamUnreachable:
+              summary: 上游不可达（docs/01 §5.4 统一 502）
+              value:
+                ok: false
+                error:
+                  code: UPSTREAM_UNREACHABLE
+                  message: 上游不可达或网络超时
+                  retryable: true
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T10:00:00+08:00"
+
+    ServiceUnavailable:
+      description: 依赖/本地服务不可用（`UPSTREAM_AUTH_EXPIRED` / `DB_UNAVAILABLE` / `SERVICE_UNAVAILABLE`），docs/01 §5.4 统一 503
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-Api-Version:
+          $ref: '#/components/headers/XApiVersion'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            dbUnavailable:
+              summary: SQLite 不可用
+              value:
+                ok: false
+                error:
+                  code: DB_UNAVAILABLE
+                  message: 本地数据库暂不可用
+                  retryable: true
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T10:00:00+08:00"
+            serviceUnavailable:
+              summary: 本地服务暂不可用（启动中/优雅关闭/传输被中断）
+              value:
+                ok: false
+                error:
+                  code: SERVICE_UNAVAILABLE
+                  message: 本地服务暂不可用（启动中/优雅关闭/传输被中断）
+                  retryable: true
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T10:00:00+08:00"
+
+    InternalServerError:
+      description: 未预期错误（`INTERNAL_ERROR`）
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        X-Api-Version:
+          $ref: '#/components/headers/XApiVersion'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            internal:
+              summary: 未预期错误
+              value:
+                ok: false
+                error:
+                  code: INTERNAL_ERROR
+                  message: 未分类内部错误
+                  retryable: true
+                meta:
+                  requestId: req_01J8Z3K5T9QW2M4R7X1C6V0B8N
+                  ts: "2026-11-14T10:00:00+08:00"
+
+  schemas:
+    # ===== 公共封套 / 错误 =====
+    Envelope:
+      type: object
+      description: |
+        成功/失败的公共响应封套（docs/05 §1.2）：成功含 `data`，失败含 `error`，`meta` 始终存在。
+        各接口响应通过 allOf 组合本封套与具体 `data` 类型。
+      required: [ok, meta]
+      properties:
+        ok:
+          type: boolean
+          description: true=成功 / false=失败
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    Meta:
+      type: object
+      description: 响应元信息（requestId + 服务端时间；列表接口追加 pagination；幂等重放标记）
+      required: [requestId, ts]
+      properties:
+        requestId:
+          type: string
+          description: 请求追踪 ID（客户端可传 X-Request-Id，否则服务端生成 `req_<ULID>`）
+        ts:
+          type: string
+          format: date-time
+          description: 服务端响应时间（ISO 8601 带时区，统一 +08:00）
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+        idempotencyReplayed:
+          type: boolean
+          description: 仅写接口：true 表示本次为幂等重放，返回首次结果（docs/05 §1.2）
+
+    PagedMeta:
+      description: 列表接口的 meta（在 Meta 基础上强制分页信息）
+      allOf:
+        - $ref: '#/components/schemas/Meta'
+        - type: object
+          required: [pagination]
+          properties:
+            pagination:
+              $ref: '#/components/schemas/PaginationMeta'
+
+    PaginationMeta:
+      type: object
+      description: 分页信息（docs/05 §2.1）
+      required: [page, size, total, totalPages]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          description: 当前页（1 起）
+        size:
+          type: integer
+          minimum: 1
+          description: 每页条数
+        total:
+          type: integer
+          minimum: 0
+          description: 总条数
+        totalPages:
+          type: integer
+          minimum: 0
+          description: 总页数
+
+    ErrorCode:
+      type: string
+      description: |
+        业务错误码全集（唯一来源：docs/01-决策与约定.md §5.4，40 个，稳定契约，新增只增不改）。
+        HTTP 状态码表达类别，`error.code` 表达精确原因。每个操作的 `x-error-codes` 为其允许子集。
+      enum:
+        - INVALID_REQUEST
+        - VALIDATION_FAILED
+        - CONFIG_INVALID
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - NOT_FOUND
+        - CALL_NOT_FOUND
+        - ACCOUNT_NOT_FOUND
+        - JOB_NOT_FOUND
+        - TERM_NOT_FOUND
+        - ACCOUNT_DISABLED
+        - ACCOUNT_LOGIN_REQUIRED
+        - ACCOUNT_LOGIN_IN_PROGRESS
+        - ACCOUNT_LOGIN_FAILED
+        - ACCOUNT_BUSY
+        - ACCOUNT_UPSTREAM_MISMATCH
+        - CALL_OUTSIDE_DIAL_WINDOW
+        - CALL_REJECTED_BY_UPSTREAM
+        - CALL_NOT_DIALABLE
+        - CALL_ALREADY_TERMINAL
+        - CALL_NOT_CANCELABLE
+        - CALL_TRACKING_TIMEOUT
+        - IDEMPOTENCY_CONFLICT
+        - RATE_LIMITED
+        - UPSTREAM_UNREACHABLE
+        - UPSTREAM_AUTH_EXPIRED
+        - UPSTREAM_BUSINESS_ERROR
+        - UPSTREAM_RATE_LIMITED
+        - UPSTREAM_RESPONSE_INVALID
+        - AUDIO_NOT_AVAILABLE
+        - AUDIO_NOT_READY
+        - AUDIO_DOWNLOAD_FAILED
+        - TRANSCRIPT_NOT_AVAILABLE
+        - TRANSCRIPT_PENDING
+        - ASR_FAILED
+        - ANALYSIS_FAILED
+        - DB_UNAVAILABLE
+        - SERVICE_UNAVAILABLE
+        - INTERNAL_ERROR
+        - NOT_IMPLEMENTED
+
+    ErrorObject:
+      type: object
+      description: 错误对象（docs/05 §1.2；错误码语义见 docs/01 §5.4）
+      required: [code, message, retryable]
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+          description: 人可读错误信息（中文）
+        retryable:
+          type: boolean
+          description: 是否可安全重试（重试建议见 docs/05 §9）
+        retryAfter:
+          type: [string, 'null']
+          format: date-time
+          description: 建议重试时间（ISO 8601；如拨打时段外给出下次窗口开启时间）
+        details:
+          type: [object, 'null']
+          additionalProperties: true
+          description: 错误详情（如 `fields[]`、`upstreamCode`、`upstreamMessage`、`loginJobId`、`busyCallId`、`readonlyFields`）
+
+    ErrorResponse:
+      description: '失败响应封套 `{ ok: false, error, meta }`（docs/05 §1.2）'
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required: [error]
+          properties:
+            ok:
+              const: false
+            error:
+              $ref: '#/components/schemas/ErrorObject'
+
+    ErrorBrief:
+      type: object
+      description: 最近错误摘要（docs/05 §2.8）
+      required: [code, message, at]
+      properties:
+        code:
+          type: string
+          description: 错误码（通常为 ErrorCode 之一）
+        message:
+          type: string
+        at:
+          type: string
+          format: date-time
+        details:
+          type: [object, 'null']
+          additionalProperties: true
+
+    HealthPayload:
+      type: object
+      description: GET /health 的 data（docs/05 §4.1）
+      required: [ok, uptimeSec, version, startedAt]
+      properties:
+        ok:
+          type: boolean
+        uptimeSec:
+          type: integer
+          minimum: 0
+        version:
+          type: string
+          description: 平台版本（语义化版本）
+        startedAt:
+          type: string
+          format: date-time
+
+    # ===== 账号 =====
+    AccountState:
+      type: string
+      description: 账号状态（docs/05 §2.2 / docs/01 §6.1）
+      enum: [online, expired, logging_in, error, disabled, unknown]
+
+    AccountStats:
+      type: object
+      description: 本地库统计（非上游实时值，docs/05 §2.2）
+      required: [totalCalls, calls24h]
+      properties:
+        totalCalls:
+          type: integer
+          minimum: 0
+        calls24h:
+          type: integer
+          minimum: 0
+        lastCallAt:
+          type: [string, 'null']
+          format: date-time
+
+    LineInfo:
+      type: object
+      description: 当前线路（来自上游 `callLineList`，docs/05 §2.2）
+      required: [lineId, lineName, mode]
+      properties:
+        lineId:
+          type: string
+        lineName:
+          type: string
+        mode:
+          type: number
+
+    AccountSummary:
+      type: object
+      description: 账号摘要（docs/05 §2.2）
+      required: [accountId, displayName, upstreamUsernameMasked, dialMode, enabled, state, stats, createdAt, updatedAt]
+      properties:
+        accountId:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_-]{1,31}$'
+          description: 账号 slug
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 64
+        upstreamUsernameMasked:
+          type: string
+          description: 脱敏上游登录手机号（如 `156****0075`）
+          example: "156****0075"
+        upstreamUserId:
+          type: [string, 'null']
+          description: 上游 userId
+        tenantCode:
+          type: [string, 'null']
+          description: 上游租户编码
+        enterpriseName:
+          type: [string, 'null']
+          description: 上游企业名
+        realName:
+          type: [string, 'null']
+          description: 上游坐席姓名
+        dialMode:
+          type: string
+          enum: [callback]
+          description: 固定 `callback`（回拨模式）
+        line:
+          description: 当前线路
+          oneOf:
+            - $ref: '#/components/schemas/LineInfo'
+            - type: 'null'
+        enabled:
+          type: boolean
+          description: 本地是否启用
+        state:
+          $ref: '#/components/schemas/AccountState'
+        jwtExpiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: JWT 到期时间（上游会话凭证本身不落地/不返回）
+        lastLoginAt:
+          type: [string, 'null']
+          format: date-time
+        lastCheckedAt:
+          type: [string, 'null']
+          format: date-time
+        lastError:
+          description: 最近错误
+          oneOf:
+            - $ref: '#/components/schemas/ErrorBrief'
+            - type: 'null'
+        deletedAt:
+          type: [string, 'null']
+          format: date-time
+          description: 账号已移除时间；软删除后历史话单仍保留时出现（列表/详情可见，登录等写操作返回 ACCOUNT_NOT_FOUND）
+        stats:
+          $ref: '#/components/schemas/AccountStats'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AccountRuntimeConfig:
+      type: object
+      description: 账号运行配置（docs/05 §2.3）
+      required: [concurrency, browser]
+      properties:
+        concurrency:
+          type: integer
+          minimum: 1
+          description: 账号并发（v1 回拨模式固定 1）
+        browser:
+          type: object
+          required: [headless, profileDirMasked]
+          properties:
+            headless:
+              type: boolean
+            profileDirMasked:
+              type: string
+              description: 浏览器 profile 目录（脱敏）
+
+    AccountSession:
+      type: object
+      description: 账号会话（docs/05 §2.3）
+      required: [state, wsConnected, cookieState]
+      properties:
+        state:
+          $ref: '#/components/schemas/AccountState'
+        jwtExpiresAt:
+          type: [string, 'null']
+          format: date-time
+        wsConnected:
+          type: boolean
+        cookieState:
+          type: string
+          enum: [valid, expired, unknown]
+        lastPongAt:
+          type: [string, 'null']
+          format: date-time
+
+    AccountSyncState:
+      type: object
+      description: 账号同步游标状态（docs/05 §2.3）
+      properties:
+        lastSyncAt:
+          type: [string, 'null']
+          format: date-time
+        cursorStartTime:
+          type: [string, 'null']
+          format: date-time
+        lagSeconds:
+          type: [integer, 'null']
+          minimum: 0
+        lastError:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorBrief'
+            - type: 'null'
+
+    AccountDetail:
+      description: 账号详情（= AccountSummary + config/session/sync/recentJobs，docs/05 §2.3）
+      allOf:
+        - $ref: '#/components/schemas/AccountSummary'
+        - type: object
+          required: [config, session, sync, recentJobs]
+          properties:
+            config:
+              $ref: '#/components/schemas/AccountRuntimeConfig'
+            session:
+              $ref: '#/components/schemas/AccountSession'
+            sync:
+              $ref: '#/components/schemas/AccountSyncState'
+            recentJobs:
+              type: array
+              description: 最近 5 个作业
+              items:
+                $ref: '#/components/schemas/JobSummary'
+
+    AccountHealthJwt:
+      type: object
+      description: JWT 健康（docs/05 §2.4）
+      required: [valid]
+      properties:
+        valid:
+          type: boolean
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+        expiresInSec:
+          type: [integer, 'null']
+          minimum: 0
+
+    AccountHealthWs:
+      type: object
+      description: WebSocket 健康（docs/05 §2.4）
+      required: [connected]
+      properties:
+        connected:
+          type: boolean
+        lastPongAt:
+          type: [string, 'null']
+          format: date-time
+        latencyMs:
+          type: [integer, 'null']
+          minimum: 0
+
+    UpstreamHealth:
+      type: object
+      description: 上游可达性（docs/05 §2.4 / §2.11）
+      required: [reachable]
+      properties:
+        reachable:
+          type: boolean
+        lastCheckedAt:
+          type: [string, 'null']
+          format: date-time
+        latencyMs:
+          type: [integer, 'null']
+          minimum: 0
+
+    AccountHealthBusy:
+      type: object
+      description: 账号占用状态（docs/05 §2.4）
+      required: [inCall]
+      properties:
+        inCall:
+          type: boolean
+        busyCallId:
+          type: [string, 'null']
+
+    AccountHealth:
+      type: object
+      description: 单账号健康（docs/05 §2.4）
+      required: [accountId, state, jwt, ws, upstream, dialWindow, busy]
+      properties:
+        accountId:
+          type: string
+        state:
+          $ref: '#/components/schemas/AccountState'
+        jwt:
+          $ref: '#/components/schemas/AccountHealthJwt'
+        ws:
+          $ref: '#/components/schemas/AccountHealthWs'
+        upstream:
+          type: object
+          required: [reachable, checkedAt]
+          properties:
+            reachable:
+              type: boolean
+            latencyMs:
+              type: [integer, 'null']
+              minimum: 0
+            checkedAt:
+              type: string
+              format: date-time
+        line:
+          description: 当前线路（同 AccountSummary.line）
+          oneOf:
+            - $ref: '#/components/schemas/LineInfo'
+            - type: 'null'
+        dialWindow:
+          $ref: '#/components/schemas/DialWindow'
+        busy:
+          $ref: '#/components/schemas/AccountHealthBusy'
+        lastError:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorBrief'
+            - type: 'null'
+
+    AccountLoginResult:
+      type: object
+      description: 登录结果（wait=true 的 200 data，docs/05 §2.14）
+      required: [accountId, state, loggedIn, loginJobId]
+      properties:
+        accountId:
+          type: string
+        state:
+          $ref: '#/components/schemas/AccountState'
+        loggedIn:
+          type: boolean
+        jwtExpiresAt:
+          type: [string, 'null']
+          format: date-time
+        loginJobId:
+          type: string
+          description: 登录作业 ID（`job_<ULID>`）
+
+    AccountLoginAccepted:
+      type: object
+      description: 异步登录受理（wait=false 的 202 data，docs/05 §2.14）
+      required: [loginJobId, status, pollUrl]
+      properties:
+        loginJobId:
+          type: string
+        status:
+          type: string
+          enum: [queued]
+        pollUrl:
+          type: string
+          description: 指向 `GET /api/v1/jobs/{jobId}` 的轮询地址
+
+    AccountCreateRequest:
+      type: object
+      description: 注册账号请求体（docs/05 §5.2；password 为 write-only，不落明文、不返回）
+      required: [accountId, displayName, username, password]
+      properties:
+        accountId:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_-]{1,31}$'
+          description: 账号 slug（唯一）
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 64
+        username:
+          type: string
+          pattern: '^1[3-9]\d{9}$'
+          description: 上游登录手机号（11 位；敏感字段，日志中脱敏）
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 8
+          maxLength: 64
+          description: 上游登录密码（write-only，不会出现在任何响应/日志）
+        concurrency:
+          type: integer
+          minimum: 1
+          default: 1
+          description: 账号并发（v1 回拨模式仅允许 1）
+        browser:
+          type: object
+          properties:
+            headless:
+              type: boolean
+            profileDirName:
+              type: string
+        metadata:
+          type: object
+          description: 自定义键值（≤10 个，值 ≤256 字符）
+          maxProperties: 10
+          additionalProperties:
+            type: string
+            maxLength: 256
+
+    AccountCreateResult:
+      type: object
+      description: POST /accounts 创建结果（docs/05 §2.14；不返回密码/手机号明文）
+      required: [accountId, displayName, upstreamUsernameMasked, enabled, state, dialMode, createdAt]
+      properties:
+        accountId:
+          type: string
+        displayName:
+          type: string
+        upstreamUsernameMasked:
+          type: string
+          example: "156****0075"
+        enabled:
+          type: boolean
+        state:
+          $ref: '#/components/schemas/AccountState'
+        dialMode:
+          type: string
+          enum: [callback]
+        createdAt:
+          type: string
+          format: date-time
+
+    AccountUpdateRequest:
+      type: object
+      description: 更新账号请求体（字段均可选，docs/05 §5.4；password 为 write-only）
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 64
+        enabled:
+          type: boolean
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 8
+          maxLength: 64
+          description: 轮换凭证（write-only）；修改后清除现有会话
+        browser:
+          type: object
+          properties:
+            headless:
+              type: boolean
+        metadata:
+          type: object
+          maxProperties: 10
+          additionalProperties:
+            type: string
+            maxLength: 256
+
+    AccountLoginRequest:
+      type: object
+      description: 登录请求体（字段均可选，docs/05 §5.6）
+      properties:
+        wait:
+          type: boolean
+          default: true
+          description: 是否等待登录结果（最多 timeoutMs）
+        timeoutMs:
+          type: integer
+          minimum: 10000
+          maximum: 300000
+          default: 120000
+          description: 等待上限（毫秒）
+        force:
+          type: boolean
+          default: false
+          description: 已有有效会话时是否强制重新登录
+
+    # ===== 话单 / 流水线 / 转写 / 分析 =====
+    CallStatus:
+      type: string
+      description: 话单状态（docs/01 §6.1；终态：ended/no_answer/failed/canceled）
+      enum: [pending, dialing, connected, ended, no_answer, failed, canceled]
+
+    PipelineStageStatus:
+      type: string
+      description: 流水线阶段状态（docs/01 §6.1；audio/transcript/analysis 各自独立）
+      enum: [pending, in_progress, ready, missing, failed, skipped]
+
+    TranscriptSource:
+      type: string
+      description: 转写来源（docs/01 §6.1）：v1 全部为本地自建 ASR（不再有 upstream/hybrid）
+      enum: [asr]
+
+    SpeakerRole:
+      type: string
+      description: 说话人角色（docs/01 §6.1）
+      enum: [agent, customer, unknown]
+
+    PhoneInfo:
+      type: object
+      description: 号码信息（客户号/坐席号，响应中脱敏，docs/05 §2.5）
+      required: [phone]
+      properties:
+        phone:
+          type: string
+          description: 号码（脱敏，如 `138****0000`）
+          example: "138****0000"
+        location:
+          type: [string, 'null']
+          description: 归属地（上游 `calleeAttr`/`callerAttr`）
+
+    UpstreamStatus:
+      type: object
+      description: 上游话单状态原始值（docs/05 §2.5）
+      properties:
+        callStatus:
+          type: [integer, 'null']
+        callStatusName:
+          type: [string, 'null']
+        finishStatus:
+          type: [integer, 'null']
+        finishStatusName:
+          type: [string, 'null']
+
+    PipelineSummary:
+      type: object
+      description: 流水线摘要（docs/05 §2.6）
+      required: [audio, transcript, analysis]
+      properties:
+        audio:
+          $ref: '#/components/schemas/PipelineStageStatus'
+        transcript:
+          $ref: '#/components/schemas/PipelineStageStatus'
+        analysis:
+          $ref: '#/components/schemas/PipelineStageStatus'
+        lastError:
+          description: 任一阶段最近错误
+          oneOf:
+            - $ref: '#/components/schemas/ErrorBrief'
+            - type: 'null'
+
+    CallSummary:
+      type: object
+      description: 话单摘要（列表项 / 呼出受理响应，docs/05 §2.5）
+      required: [callId, accountId, direction, to, from, status, pipeline, audioAvailable, createdAt, updatedAt]
+      properties:
+        callId:
+          type: string
+          description: 本地话单 ID（`call_<ULID>`）
+        accountId:
+          type: string
+          description: 归属账号
+        upstreamCallId:
+          type: [string, 'null']
+          description: 上游通话 ID（雪花 ID 字符串；呼出受理后可能短暂为空）
+        direction:
+          type: string
+          enum: [outbound]
+          description: 固定 `outbound`
+        to:
+          $ref: '#/components/schemas/PhoneInfo'
+        from:
+          $ref: '#/components/schemas/PhoneInfo'
+        lineNumber:
+          type: [string, 'null']
+          description: 中间号（上游 `telX`）
+        customerName:
+          type: [string, 'null']
+          description: 客户名（本地录入或上游 CRM）
+        lineId:
+          type: [string, 'null']
+          description: 线路（上游 `interfaceId`）
+        lineName:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/CallStatus'
+        statusReason:
+          type: [string, 'null']
+          description: 人可读原因（如"拨打时段外""上游拒绝"）
+        dialedAt:
+          type: [string, 'null']
+          format: date-time
+          description: 上游 `startTime`；未回填时回退为本地提交时间 `submittedAt`（docs/01 §8.2）
+        answeredAt:
+          type: [string, 'null']
+          format: date-time
+          description: 接通时间（由状态推断/上游更新）
+        endedAt:
+          type: [string, 'null']
+          format: date-time
+          description: 结束时间（上游 `endTime`）
+        durationSec:
+          type: [integer, 'null']
+          minimum: 0
+          description: 通话时长（上游 `duration`）
+        cost:
+          type: [number, 'null']
+          description: 话费（上游 `postage`，单位：元）
+        upstreamStatus:
+          description: 上游原始状态码/名称
+          oneOf:
+            - $ref: '#/components/schemas/UpstreamStatus'
+            - type: 'null'
+        pipeline:
+          $ref: '#/components/schemas/PipelineSummary'
+        transcriptPreview:
+          type: [string, 'null']
+          description: 归一化后转写前 80 字（无转写则 null）
+        audioAvailable:
+          type: boolean
+          description: 是否已归档录音
+        createdAt:
+          type: string
+          format: date-time
+          description: 本地受理时间
+        updatedAt:
+          type: string
+          format: date-time
+          description: 本地更新时间
+
+    UpstreamCallInfo:
+      type: object
+      description: 上游话单原始字段（docs/05 §2.9；`raw` 仅 ?includeRaw=true 返回）
+      properties:
+        callStatusName:
+          type: [string, 'null']
+        finishStatus:
+          type: [integer, 'null']
+        finishStatusName:
+          type: [string, 'null']
+        callType:
+          type: [integer, 'null']
+        handle:
+          type: [integer, 'null']
+        interfaceId:
+          type: [string, 'null']
+        interfaceName:
+          type: [string, 'null']
+        telA:
+          type: [string, 'null']
+          description: 坐席号（响应中脱敏）
+        telB:
+          type: [string, 'null']
+          description: 客户号（响应中脱敏）
+        telX:
+          type: [string, 'null']
+          description: 中间号（响应中脱敏）
+        postage:
+          type: [number, 'null']
+        agentCode:
+          type: [number, 'null']
+        sipCodeResult:
+          type: [string, 'null']
+        callerAttr:
+          type: [string, 'null']
+        calleeAttr:
+          type: [string, 'null']
+        tenantCode:
+          type: [string, 'null']
+        enterpriseName:
+          type: [string, 'null']
+        raw:
+          type: object
+          additionalProperties: true
+          description: 上游原始对象（仅 ?includeRaw=true 返回）
+
+    CallTimeline:
+      type: object
+      description: 话单时间线（docs/05 §2.9）
+      required: [createdAt]
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        submittedAt:
+          type: [string, 'null']
+          format: date-time
+          description: 本地提交上游 callV2 的时间；上游 startTime 未回填时 dialedAt 回退为该值（docs/05 §2.9）
+        dialingAt:
+          type: [string, 'null']
+          format: date-time
+        connectedAt:
+          type: [string, 'null']
+          format: date-time
+        endedAt:
+          type: [string, 'null']
+          format: date-time
+
+    PipelineAudioStage:
+      type: object
+      description: 录音阶段详情（docs/05 §2.9 pipelineDetail.audio）
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/PipelineStageStatus'
+        audioId:
+          type: [string, 'null']
+        downloadedAt:
+          type: [string, 'null']
+          format: date-time
+        lastError:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorBrief'
+            - type: 'null'
+
+    PipelineTranscriptStage:
+      type: object
+      description: 转写阶段详情（docs/05 §2.9 pipelineDetail.transcript）
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/PipelineStageStatus'
+        transcriptId:
+          type: [string, 'null']
+        source:
+          oneOf:
+            - $ref: '#/components/schemas/TranscriptSource'
+            - type: 'null'
+        provider:
+          type: [string, 'null']
+          description: ASR provider 标识，如 `minimax:asr-1.0`
+        chunkCount:
+          type: [integer, 'null']
+          minimum: 0
+          description: 长通话 ASR 分块数（≤480s 整段为 1）
+        needsReview:
+          type: [boolean, 'null']
+          description: 说话人角色映射低置信/需人工复核
+        generatedAt:
+          type: [string, 'null']
+          format: date-time
+        lastError:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorBrief'
+            - type: 'null'
+
+    PipelineAnalysisStage:
+      type: object
+      description: 分析阶段详情（docs/05 §2.9 pipelineDetail.analysis）
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/PipelineStageStatus'
+        analysisId:
+          type: [string, 'null']
+        generatedAt:
+          type: [string, 'null']
+          format: date-time
+        lastError:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorBrief'
+            - type: 'null'
+
+    PipelineDetail:
+      type: object
+      description: 流水线阶段详情（docs/05 §2.9）
+      required: [audio, transcript, analysis]
+      properties:
+        audio:
+          $ref: '#/components/schemas/PipelineAudioStage'
+        transcript:
+          $ref: '#/components/schemas/PipelineTranscriptStage'
+        analysis:
+          $ref: '#/components/schemas/PipelineAnalysisStage'
+
+    AudioInfo:
+      type: object
+      description: 录音信息（CallDetail.recording，docs/05 §2.9）
+      required: [available]
+      properties:
+        available:
+          type: boolean
+        downloadUrl:
+          type: [string, 'null']
+          description: 录音下载地址（`/api/v1/calls/{callId}/audio`）
+        format:
+          type: [string, 'null']
+          enum: [wav, null]
+        durationMs:
+          type: [integer, 'null']
+          minimum: 0
+        sizeBytes:
+          type: [integer, 'null']
+          minimum: 0
+        sha256:
+          type: [string, 'null']
+        sampleRate:
+          type: [integer, 'null']
+          minimum: 0
+        channels:
+          type: [integer, 'null']
+          minimum: 0
+
+    TranscriptInfo:
+      type: object
+      description: 转写信息（CallDetail.transcript，docs/05 §2.9）
+      required: [available]
+      properties:
+        available:
+          type: boolean
+        source:
+          oneOf:
+            - $ref: '#/components/schemas/TranscriptSource'
+            - type: 'null'
+        segmentCount:
+          type: [integer, 'null']
+          minimum: 0
+        needsReview:
+          type: [boolean, 'null']
+          description: 说话人角色映射低置信/需人工复核（docs/05 §2.9）
+        url:
+          type: [string, 'null']
+          description: 转写获取地址
+
+    AnalysisInfo:
+      type: object
+      description: 分析信息（CallDetail.analysis，docs/05 §2.9）
+      required: [available]
+      properties:
+        available:
+          type: boolean
+        analysisId:
+          type: [string, 'null']
+        summary:
+          type: [string, 'null']
+          description: 人可读摘要
+        intent:
+          type: [string, 'null']
+          description: 意向标签（人可读，如 `medium`；结构化意向见 AnalysisPayload.intent）
+        url:
+          type: [string, 'null']
+
+    CallDetail:
+      description: 话单详情（= CallSummary + 以下字段，docs/05 §2.9）
+      allOf:
+        - $ref: '#/components/schemas/CallSummary'
+        - type: object
+          required: [upstream, timeline, pipelineDetail, recording, transcript, analysis, eventsCount]
+          properties:
+            upstream:
+              $ref: '#/components/schemas/UpstreamCallInfo'
+            timeline:
+              $ref: '#/components/schemas/CallTimeline'
+            pipelineDetail:
+              $ref: '#/components/schemas/PipelineDetail'
+            recording:
+              $ref: '#/components/schemas/AudioInfo'
+            transcript:
+              $ref: '#/components/schemas/TranscriptInfo'
+            analysis:
+              $ref: '#/components/schemas/AnalysisInfo'
+            eventsCount:
+              type: integer
+              minimum: 0
+              description: 事件数量
+            metadata:
+              type: object
+              additionalProperties:
+                type: string
+              description: 呼出时传入的自定义键值（docs/05 §2.9）
+            events:
+              type: array
+              description: 最近 50 条事件（?includeEvents=true 时返回；docs/05 §2.9）
+              items:
+                $ref: '#/components/schemas/EventRecord'
+            analysisPayload:
+              description: 完整 AI 后处理产出（?includeAnalysis=true 时返回；docs/05 §2.9/§6.4）
+              oneOf:
+                - $ref: '#/components/schemas/AnalysisPayload'
+                - type: 'null'
+
+    TranscriptSegment:
+      type: object
+      description: 转写分段（docs/05 §2.9）
+      required: [segmentId, index, beginMs, endMs, role, rawText, normalizedText]
+      properties:
+        segmentId:
+          type: string
+        index:
+          type: integer
+          minimum: 0
+          description: 从 0 开始
+        beginMs:
+          type: integer
+          minimum: 0
+          description: 相对录音起点毫秒
+        endMs:
+          type: integer
+          minimum: 0
+          description: 相对录音起点毫秒
+        channel:
+          type: [integer, 'null']
+          description: 声道号（双声道 A/B 拆分路径为 0/1；单声道路径为 null）
+        speakerLabel:
+          type: [string, 'null']
+          description: ASR 匿名说话人标签（S1/S2…，块内有效）
+        chunkIndex:
+          type: [integer, 'null']
+          minimum: 0
+          description: 长通话 ASR 分块序号（≤480s 整段为 null）
+        role:
+          $ref: '#/components/schemas/SpeakerRole'
+        rawText:
+          type: string
+          description: ASR 原文
+        normalizedText:
+          type: string
+          description: 词表归一后文本
+        confidence:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 1
+          description: 0–1（本地 ASR）
+        emotionValue:
+          type: [number, 'null']
+          description: 预留字段（v1 ASR 不返回，恒 null）
+        speechRate:
+          type: [number, 'null']
+          description: 预留字段（v1 恒 null）
+        silenceBeforeMs:
+          type: [integer, 'null']
+          minimum: 0
+          description: 预留字段（v1 恒 null）
+
+    AnalysisBrief:
+      type: object
+      description: TranscriptPayload.analysis（?includeAnalysis=true 时返回，docs/05 §2.9）
+      required: [analysisId, summary]
+      properties:
+        analysisId:
+          type: string
+        summary:
+          type: string
+        intent:
+          type: [string, 'null']
+
+    TranscriptPayload:
+      type: object
+      description: 转写响应（docs/05 §2.9）
+      required: [callId, transcriptId, source, language, status, isCurrent, fullText, segments, createdAt, updatedAt]
+      properties:
+        callId:
+          type: string
+        transcriptId:
+          type: string
+        source:
+          $ref: '#/components/schemas/TranscriptSource'
+        provider:
+          type: [string, 'null']
+          description: ASR provider 标识，如 `minimax:asr-1.0`
+        language:
+          type: string
+          default: zh-CN
+        status:
+          $ref: '#/components/schemas/PipelineStageStatus'
+        isCurrent:
+          type: boolean
+          description: 是否当前版本
+        durationMs:
+          type: [integer, 'null']
+          minimum: 0
+        fullText:
+          type: string
+          description: 归一化后的全文（坐席+客户按时间顺序拼接）
+        segments:
+          type: array
+          items:
+            $ref: '#/components/schemas/TranscriptSegment'
+        analysis:
+          description: 仅 ?includeAnalysis=true 时返回
+          oneOf:
+            - $ref: '#/components/schemas/AnalysisBrief'
+            - type: 'null'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AnalysisSummary:
+      type: object
+      description: 结构化摘要（docs/05 §2.9 AnalysisPayload.summary）
+      required: [short, bullets]
+      properties:
+        short:
+          type: string
+        bullets:
+          type: array
+          items:
+            type: string
+
+    AnalysisIntent:
+      type: object
+      description: 结构化意向（docs/05 §2.9 AnalysisPayload.intent）
+      required: [label]
+      properties:
+        label:
+          type: string
+        score:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 1
+
+    TermApplied:
+      type: object
+      description: 词表命中记录（docs/05 §2.9 termsApplied / §7.9 normalize applied）
+      required: [from, to, count]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+
+    SpeakerMapping:
+      type: object
+      description: 说话人映射方法（docs/05 §2.9 AnalysisPayload.speakerMapping；v1 ASR diarization + 角色映射）
+      required: [method]
+      properties:
+        method:
+          type: string
+          enum: [channel, asr_diarization, llm_reconciled, heuristic]
+        agentChannels:
+          type: [array, 'null']
+          items:
+            type: integer
+        confidence:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 1
+        needsReview:
+          type: [boolean, 'null']
+          description: 低置信/需人工复核
+        evidence:
+          type: [string, 'null']
+          description: 判定依据摘要（≤200 字）
+
+    AnalysisUsage:
+      type: object
+      description: LLM 调用用量（docs/05 §2.9 AnalysisPayload.usage；观测用）
+      required: [promptTokens, completionTokens, totalTokens, latencyMs]
+      properties:
+        promptTokens:
+          type: integer
+          minimum: 0
+        completionTokens:
+          type: integer
+          minimum: 0
+        totalTokens:
+          type: integer
+          minimum: 0
+        latencyMs:
+          type: integer
+          minimum: 0
+
+    AnalysisPayload:
+      type: object
+      description: AI 后处理产出（docs/05 §2.9；含于 detail/transcript 或独立事件，v1 不单独开接口）
+      required: [analysisId, callId, status, summary, keywords, termsApplied, speakerMapping, generatedAt]
+      properties:
+        analysisId:
+          type: string
+        callId:
+          type: string
+        status:
+          $ref: '#/components/schemas/PipelineStageStatus'
+        model:
+          type: [string, 'null']
+          description: 使用的 LLM/处理管线（不含密钥）
+        summary:
+          $ref: '#/components/schemas/AnalysisSummary'
+        intent:
+          description: 结构化意向
+          oneOf:
+            - $ref: '#/components/schemas/AnalysisIntent'
+            - type: 'null'
+        keywords:
+          type: array
+          items:
+            type: string
+        termsApplied:
+          type: array
+          items:
+            $ref: '#/components/schemas/TermApplied'
+        speakerMapping:
+          $ref: '#/components/schemas/SpeakerMapping'
+        promptVersion:
+          type: [string, 'null']
+          description: 后处理 prompt 版本（如 analysis-v1）
+        usage:
+          description: LLM 用量（观测用，不含密钥）
+          oneOf:
+            - $ref: '#/components/schemas/AnalysisUsage'
+            - type: 'null'
+        generatedAt:
+          type: string
+          format: date-time
+
+    DialWindow:
+      type: object
+      description: |
+        拨打时段（docs/05 §2.8；上游强制 07:50–22:00 Asia/Shanghai）。
+        `windowStart`/`windowEnd` 为 HH:MM，`timezone` 为 IANA 时区名。
+      required: [open, windowStart, windowEnd, timezone]
+      properties:
+        open:
+          type: boolean
+          description: 当前是否可呼出（按服务端时钟与配置时段）
+        windowStart:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          example: "07:50"
+        windowEnd:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          example: "22:00"
+        timezone:
+          type: string
+          example: Asia/Shanghai
+        nextOpenAt:
+          type: [string, 'null']
+          format: date-time
+          description: 窗口关闭时给出下次开启时间
+
+    # ===== 作业 / 事件 / 平台状态 =====
+    JobType:
+      type: string
+      description: 作业类型（docs/01 §6.1；v1 已删除 transcript_fetch/transcript_pending_wait，转写走 asr 作业）
+      enum: [login, sync, audio_fetch, asr, analysis, reprocess, backfill]
+
+    JobStatus:
+      type: string
+      description: 作业状态（docs/01 §6.1）
+      enum: [queued, running, succeeded, failed, canceled]
+
+    EventType:
+      type: string
+      description: 事件类型（docs/01 §7.3，23 种业务事件 + job.updated）
+      enum:
+        - account.login.started
+        - account.login.succeeded
+        - account.login.failed
+        - account.session.expired
+        - account.health.changed
+        - call.created
+        - call.dialing
+        - call.connected
+        - call.ended
+        - call.no_answer
+        - call.failed
+        - call.canceled
+        - call.audio.ready
+        - call.audio.missing
+        - call.audio.failed
+        - call.transcript.ready
+        - call.transcript.failed
+        - call.analysis.ready
+        - call.analysis.failed
+        - sync.started
+        - sync.progress
+        - sync.completed
+        - sync.failed
+        - job.updated
+
+    JobProgress:
+      type: object
+      description: 作业进度（docs/05 §2.7）
+      required: [current]
+      properties:
+        current:
+          type: integer
+          minimum: 0
+        total:
+          type: [integer, 'null']
+          minimum: 0
+        unit:
+          type: [string, 'null']
+        message:
+          type: [string, 'null']
+
+    JobSummary:
+      type: object
+      description: 作业摘要（docs/05 §2.7）
+      required: [jobId, type, status, attempts, maxAttempts, createdAt, updatedAt]
+      properties:
+        jobId:
+          type: string
+          description: 本地作业 ID（`job_<ULID>`）
+        type:
+          $ref: '#/components/schemas/JobType'
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        accountId:
+          type: [string, 'null']
+        callId:
+          type: [string, 'null']
+        attempts:
+          type: integer
+          minimum: 0
+        maxAttempts:
+          type: integer
+          minimum: 0
+        progress:
+          oneOf:
+            - $ref: '#/components/schemas/JobProgress'
+            - type: 'null'
+        scheduledAt:
+          type: [string, 'null']
+          format: date-time
+        startedAt:
+          type: [string, 'null']
+          format: date-time
+        finishedAt:
+          type: [string, 'null']
+          format: date-time
+        lastError:
+          description: 最近错误 `{ code, message, at }`
+          oneOf:
+            - $ref: '#/components/schemas/ErrorBrief'
+            - type: 'null'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    JobDetail:
+      description: 作业详情（= JobSummary + payload/result/logs，docs/05 §2.7）
+      allOf:
+        - $ref: '#/components/schemas/JobSummary'
+        - type: object
+          required: [logs]
+          properties:
+            payload:
+              type: [object, 'null']
+              additionalProperties: true
+              description: 作业输入（脱敏：不含密码/JWT）
+            result:
+              type: [object, 'null']
+              additionalProperties: true
+              description: '作业结果摘要（如 `{ fetched: 120, upserted: 118 }`）'
+            logs:
+              type: array
+              description: 最近 50 行作业日志（已脱敏）
+              items:
+                type: string
+
+    EventRecord:
+      type: object
+      description: 事件记录（docs/05 §2.12；事件类型见 docs/01 §7.3）
+      required: [eventId, type, occurredAt, data]
+      properties:
+        eventId:
+          type: string
+          description: 事件 ID（`evt_<ULID>`）
+        type:
+          $ref: '#/components/schemas/EventType'
+        occurredAt:
+          type: string
+          format: date-time
+        accountId:
+          type: [string, 'null']
+        callId:
+          type: [string, 'null']
+        data:
+          type: object
+          additionalProperties: true
+          description: 事件类型相关字段（docs/01 §7.3）
+
+    DbStatus:
+      type: object
+      description: 本地 DB 状态（docs/05 §2.11）
+      required: [ok, schemaVersion, sizeBytes, walSizeBytes, latencyMs]
+      properties:
+        ok:
+          type: boolean
+        schemaVersion:
+          type: integer
+          minimum: 0
+        sizeBytes:
+          type: integer
+          minimum: 0
+        walSizeBytes:
+          type: integer
+          minimum: 0
+        latencyMs:
+          type: integer
+          minimum: 0
+
+    AccountCounts:
+      type: object
+      description: 账号状态计数（docs/05 §2.11）
+      required: [total, online, expired, loggingIn, error, disabled]
+      properties:
+        total:
+          type: integer
+          minimum: 0
+        online:
+          type: integer
+          minimum: 0
+        expired:
+          type: integer
+          minimum: 0
+        loggingIn:
+          type: integer
+          minimum: 0
+        error:
+          type: integer
+          minimum: 0
+        disabled:
+          type: integer
+          minimum: 0
+
+    QueueStatus:
+      type: object
+      description: 队列积压（docs/05 §2.11）
+      required: [jobsQueued, jobsRunning, jobsFailed24h, audioPending, transcriptPending, analysisPending]
+      properties:
+        jobsQueued:
+          type: integer
+          minimum: 0
+        jobsRunning:
+          type: integer
+          minimum: 0
+        jobsFailed24h:
+          type: integer
+          minimum: 0
+        audioPending:
+          type: integer
+          minimum: 0
+        transcriptPending:
+          type: integer
+          minimum: 0
+        analysisPending:
+          type: integer
+          minimum: 0
+
+    SyncStatus:
+      type: object
+      description: 同步状态（docs/05 §2.11）
+      required: [laggingAccounts]
+      properties:
+        lastSyncAt:
+          type: [string, 'null']
+          format: date-time
+        laggingAccounts:
+          type: array
+          items:
+            type: string
+        lastError:
+          oneOf:
+            - $ref: '#/components/schemas/ErrorBrief'
+            - type: 'null'
+
+    EventStreamStatus:
+      type: object
+      description: 事件流状态（docs/05 §2.11）
+      required: [sseClients]
+      properties:
+        sseClients:
+          type: integer
+          minimum: 0
+
+    LimitsStatus:
+      type: object
+      description: 生效限流参数（docs/05 §2.11）
+      required: [apiQps, perAccountConcurrency, globalConcurrency, dialCooldownMs]
+      properties:
+        apiQps:
+          type: integer
+          minimum: 1
+        perAccountConcurrency:
+          type: integer
+          minimum: 1
+        globalConcurrency:
+          type: integer
+          minimum: 1
+        dialCooldownMs:
+          type: integer
+          minimum: 0
+
+    StatusPayload:
+      type: object
+      description: 平台状态（GET /status 的 data，docs/05 §2.11）
+      required: [version, startedAt, uptimeSec, now, db, accounts, upstream, dialWindow, queues, sync, events, limits]
+      properties:
+        version:
+          type: string
+          description: 平台版本（语义化版本）
+        startedAt:
+          type: string
+          format: date-time
+          description: 进程启动时间
+        uptimeSec:
+          type: integer
+          minimum: 0
+        now:
+          type: string
+          format: date-time
+          description: 服务端当前时间（判断拨打时段用）
+        db:
+          $ref: '#/components/schemas/DbStatus'
+        accounts:
+          $ref: '#/components/schemas/AccountCounts'
+        accountsDetail:
+          type: [array, 'null']
+          description: 全量账号摘要（数量 ≤200 时返回；超出可用 ?detail=false 省略）
+          items:
+            $ref: '#/components/schemas/AccountSummary'
+        upstream:
+          description: 任一在线账号探测结果聚合
+          allOf:
+            - $ref: '#/components/schemas/UpstreamHealth'
+            - type: object
+              properties:
+                lastCheckedAt:
+                  type: [string, 'null']
+                  format: date-time
+        dialWindow:
+          $ref: '#/components/schemas/DialWindow'
+        queues:
+          $ref: '#/components/schemas/QueueStatus'
+        sync:
+          $ref: '#/components/schemas/SyncStatus'
+        events:
+          $ref: '#/components/schemas/EventStreamStatus'
+        limits:
+          $ref: '#/components/schemas/LimitsStatus'
+
+    # ===== 配置 =====
+    ServerConfig:
+      type: object
+      description: 服务端配置（docs/05 §2.13 / docs/01 §9）
+      required: [host, port, allowRemote]
+      properties:
+        host:
+          type: string
+          example: 127.0.0.1
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          example: 8710
+        allowRemote:
+          type: boolean
+          description: 是否允许远程访问（默认 false；开启时必须认证）
+
+    StorageConfig:
+      type: object
+      description: 存储配置（docs/05 §2.13）
+      required: [dataDir, dbFile, audioDir]
+      properties:
+        dataDir:
+          type: string
+        dbFile:
+          type: string
+        audioDir:
+          type: string
+
+    BrowserConfig:
+      type: object
+      description: 浏览器配置（docs/05 §2.13）
+      required: [headless, profileRoot]
+      properties:
+        headless:
+          type: boolean
+        profileRoot:
+          type: string
+        executablePathMasked:
+          type: [string, 'null']
+          description: 浏览器可执行文件路径（脱敏；null=自动探测）
+
+    DialConfig:
+      type: object
+      description: 拨打时段配置（docs/05 §2.13）
+      required: [windowStart, windowEnd, timezone, scheduleOutsideWindow]
+      properties:
+        windowStart:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+        windowEnd:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+        timezone:
+          type: string
+        scheduleOutsideWindow:
+          type: boolean
+          description: 时段外是否允许受理并排队（true=入队等待；false=直接 422）
+
+    LimitsConfig:
+      type: object
+      description: 限流配置（docs/05 §2.13）
+      required: [perAccountConcurrency, globalConcurrency, upstreamReadQps, dialCooldownMs, apiQps]
+      properties:
+        perAccountConcurrency:
+          type: integer
+          enum: [1]
+          description: v1 回拨模式固定 1（其他值 → VALIDATION_FAILED）
+        globalConcurrency:
+          type: integer
+          minimum: 1
+        upstreamReadQps:
+          type: integer
+          minimum: 1
+        dialCooldownMs:
+          type: integer
+          minimum: 0
+        apiQps:
+          type: integer
+          minimum: 1
+
+    SyncConfig:
+      type: object
+      description: 同步配置（docs/05 §2.13）
+      required: [intervalMs, pageSize, lookbackDays]
+      properties:
+        intervalMs:
+          type: integer
+          minimum: 10000
+        pageSize:
+          type: integer
+          minimum: 10
+          maximum: 100
+        lookbackDays:
+          type: integer
+          minimum: 1
+
+    AsrConfig:
+      type: object
+      description: 本地 ASR 配置（MiniMax，docs/13 §2；对外字段见 docs/05 §2.13）
+      required: [provider, baseUrl, model, language, chunkSeconds, concurrency]
+      properties:
+        provider:
+          type: string
+          description: 固定 minimax（v1）
+        baseUrl:
+          type: string
+          format: uri
+        model:
+          type: string
+          description: 默认 asr-1.0
+        language:
+          type: string
+          description: 默认 zh
+        chunkSeconds:
+          type: integer
+          minimum: 60
+          maximum: 480
+        concurrency:
+          type: integer
+          minimum: 1
+
+    AnalysisConfig:
+      type: object
+      description: LLM 后处理配置（DeepSeek，docs/13 §3/§6；对外字段见 docs/05 §2.13）
+      required: [provider, baseUrl, model, escalateModel, promptVersion, temperature, maxTokens, concurrency]
+      properties:
+        provider:
+          type: string
+          description: 固定 deepseek（v1）
+        baseUrl:
+          type: string
+          format: uri
+        model:
+          type: string
+          description: 默认 deepseek-chat
+        escalateModel:
+          type: string
+          description: 升级模型 deepseek-v4-pro
+        promptVersion:
+          type: string
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+        maxTokens:
+          type: integer
+          minimum: 100
+        concurrency:
+          type: integer
+          minimum: 1
+
+    RoleMappingConfig:
+      type: object
+      description: |
+        说话人角色映射配置（docs/13 §4、docs/05 §2.13）。`method=auto` 表示按声道自动选择；
+        映射结果的取值枚举见 `SpeakerMapping.method`（不含 auto）。
+      required: [method, llmVerify]
+      properties:
+        method:
+          type: string
+          enum: [auto, channel, asr_diarization, llm_reconciled, heuristic]
+        llmVerify:
+          type: boolean
+          description: 是否用 LLM 复核角色映射（双保险）
+
+    PipelineConfig:
+      type: object
+      description: 流水线配置（docs/05 §2.13；ASR=MiniMax、LLM=DeepSeek，规格见 docs/13）
+      required: [asr, analysis, roleMapping]
+      properties:
+        asr:
+          $ref: '#/components/schemas/AsrConfig'
+        analysis:
+          $ref: '#/components/schemas/AnalysisConfig'
+        roleMapping:
+          $ref: '#/components/schemas/RoleMappingConfig'
+
+    WebhookConfig:
+      type: object
+      description: 出站 webhook 配置（docs/01 §9、docs/05 §2.13；`secret` 只存 secrets 文件，GET /config 返回脱敏）
+      required: [url, eventTypes, enabled]
+      properties:
+        url:
+          type: string
+          format: uri
+          pattern: '^https://'
+          description: 投递地址（必须 https）
+        eventTypes:
+          type: array
+          description: 订阅事件类型（支持 `call.*` 前缀通配，见 docs/01 §7.3）
+          items:
+            type: string
+        secret:
+          type: [string, 'null']
+          description: HMAC 签名密钥（只存 secrets 文件；GET /config 返回脱敏值；修改请走 secrets 文件，本接口修改返回 CONFIG_INVALID）
+        enabled:
+          type: boolean
+        timeoutMs:
+          type: [number, 'null']
+          description: 投递超时（毫秒）
+
+    EventsConfig:
+      type: object
+      description: 事件配置（docs/05 §2.13）
+      required: [sseHeartbeatMs, webhooks]
+      properties:
+        sseHeartbeatMs:
+          type: integer
+          minimum: 0
+        webhooks:
+          type: array
+          description: 出站 webhook 配置（v1 默认空数组，元素结构见 WebhookConfig）
+          items:
+            $ref: '#/components/schemas/WebhookConfig'
+
+    Config:
+      type: object
+      description: 生效配置（GET /config 的 data，docs/05 §2.13；密钥字段一律脱敏）
+      required: [server, storage, browser, dial, limits, sync, pipeline, events]
+      properties:
+        server:
+          $ref: '#/components/schemas/ServerConfig'
+        storage:
+          $ref: '#/components/schemas/StorageConfig'
+        browser:
+          $ref: '#/components/schemas/BrowserConfig'
+        dial:
+          $ref: '#/components/schemas/DialConfig'
+        limits:
+          $ref: '#/components/schemas/LimitsConfig'
+        sync:
+          $ref: '#/components/schemas/SyncConfig'
+        pipeline:
+          $ref: '#/components/schemas/PipelineConfig'
+        events:
+          $ref: '#/components/schemas/EventsConfig'
+
+    ConfigPatch:
+      type: object
+      additionalProperties: false
+      description: |
+        PATCH /config 请求体（JSON Merge Patch / RFC 7386 语义，docs/05 §4.4）：对象递归合并、
+        显式 null 删除配置项并回落默认值、数组整体替换。仅接受 Config 中的非密钥字段；
+        未知字段 → 400 INVALID_REQUEST；密钥字段 → 400 CONFIG_INVALID（details.readonlyFields）。
+        各嵌套对象同样只接受下列字段。
+      properties:
+        server:
+          type: object
+          additionalProperties: false
+          properties:
+            host:
+              type: string
+            port:
+              type: integer
+              minimum: 1
+              maximum: 65535
+            allowRemote:
+              type: boolean
+        storage:
+          type: object
+          additionalProperties: false
+          properties:
+            dataDir:
+              type: string
+            dbFile:
+              type: string
+            audioDir:
+              type: string
+        browser:
+          type: object
+          additionalProperties: false
+          properties:
+            headless:
+              type: boolean
+            profileRoot:
+              type: string
+            executablePathMasked:
+              type: [string, 'null']
+        dial:
+          type: object
+          additionalProperties: false
+          properties:
+            windowStart:
+              type: string
+              pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+            windowEnd:
+              type: string
+              pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+            timezone:
+              type: string
+            scheduleOutsideWindow:
+              type: boolean
+        limits:
+          type: object
+          additionalProperties: false
+          properties:
+            perAccountConcurrency:
+              type: integer
+              enum: [1]
+              description: v1 回拨模式固定 1，其他值 → VALIDATION_FAILED
+            globalConcurrency:
+              type: integer
+              minimum: 1
+            upstreamReadQps:
+              type: integer
+              minimum: 1
+            dialCooldownMs:
+              type: integer
+              minimum: 0
+            apiQps:
+              type: integer
+              minimum: 1
+        sync:
+          type: object
+          additionalProperties: false
+          properties:
+            intervalMs:
+              type: integer
+              minimum: 10000
+            pageSize:
+              type: integer
+              minimum: 10
+              maximum: 100
+            lookbackDays:
+              type: integer
+              minimum: 1
+        pipeline:
+          type: object
+          additionalProperties: false
+          description: 局部更新（对象递归合并；未出现的字段保持原值）
+          properties:
+            asr:
+              type: object
+              additionalProperties: false
+              properties:
+                provider:
+                  type: string
+                baseUrl:
+                  type: string
+                  format: uri
+                model:
+                  type: string
+                language:
+                  type: string
+                chunkSeconds:
+                  type: integer
+                  minimum: 60
+                  maximum: 480
+                concurrency:
+                  type: integer
+                  minimum: 1
+            analysis:
+              type: object
+              additionalProperties: false
+              properties:
+                provider:
+                  type: string
+                baseUrl:
+                  type: string
+                  format: uri
+                model:
+                  type: string
+                escalateModel:
+                  type: string
+                promptVersion:
+                  type: string
+                temperature:
+                  type: number
+                  minimum: 0
+                  maximum: 2
+                maxTokens:
+                  type: integer
+                  minimum: 100
+                concurrency:
+                  type: integer
+                  minimum: 1
+            roleMapping:
+              type: object
+              additionalProperties: false
+              properties:
+                method:
+                  type: string
+                  enum: [auto, channel, asr_diarization, llm_reconciled, heuristic]
+                llmVerify:
+                  type: boolean
+        events:
+          type: object
+          additionalProperties: false
+          properties:
+            sseHeartbeatMs:
+              type: integer
+              minimum: 0
+            webhooks:
+              type: array
+              items:
+                $ref: '#/components/schemas/WebhookConfig'
+
+    ConfigPatchResult:
+      description: PATCH /config 成功响应 data（完整 Config + restartRequired，docs/05 §4.4）
+      allOf:
+        - $ref: '#/components/schemas/Config'
+        - type: object
+          required: [restartRequired]
+          properties:
+            restartRequired:
+              type: boolean
+              description: 是否需重启生效（修改 server.host/port 时为 true）
+
+    # ===== 写请求 / 受理结果 =====
+    DialRequest:
+      type: object
+      description: 发起呼出请求体（docs/05 §6.1）
+      required: [to]
+      properties:
+        to:
+          type: string
+          pattern: '^(?:1[3-9]\d{9}|0\d{2,3}[- ]?\d{7,8})$'
+          description: 被叫号码：大陆手机或固话（允许空格/横线，服务端规范化）
+        accountId:
+          type: string
+          description: 指定账号；仅 1 个启用账号时可省略，多账号省略 → 400 VALIDATION_FAILED（reason=account_required）
+        customerName:
+          type: string
+          maxLength: 64
+          description: 客户名（落库）
+        metadata:
+          type: object
+          maxProperties: 10
+          additionalProperties:
+            type: string
+            maxLength: 256
+          description: 自定义键值（随话单保存并出现在详情 metadata）
+        scheduledAt:
+          type: string
+          format: date-time
+          description: 期望呼出时间；仅允许未来时间且须在窗口内；省略=立即
+        dryRun:
+          type: boolean
+          default: false
+          description: true=只做校验不真正呼出，返回将执行的计划（不产生 Call）
+
+    CallAccepted:
+      description: 呼出受理响应（= CallSummary，docs/05 §2.14；用于 POST /calls 的 201/202 data）
+      allOf:
+        - $ref: '#/components/schemas/CallSummary'
+
+    DryRunResult:
+      type: object
+      description: POST /calls dryRun 校验结果（docs/05 §2.14；不产生 Call）
+      required: [dryRun, willDial, accountId, to, dialWindow, warnings]
+      properties:
+        dryRun:
+          type: boolean
+          const: true
+          description: 固定 true
+        willDial:
+          type: boolean
+        accountId:
+          type: string
+        to:
+          type: string
+          description: 被叫号码（脱敏）
+        dialWindow:
+          $ref: '#/components/schemas/DialWindow'
+        warnings:
+          type: array
+          description: 告警项（如 `number_exists_in_crm`）
+          items:
+            type: string
+        estimatedCost:
+          type: [number, 'null']
+          description: 预估话费（v1 为 null，可选）
+
+    ReprocessRequest:
+      type: object
+      description: 重跑流水线请求体（docs/05 §6.7）
+      required: [stages]
+      properties:
+        stages:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: 要重跑的阶段子集（analysis 隐含需要 transcript）
+          items:
+            type: string
+            enum: [audio, transcript, analysis]
+        force:
+          type: boolean
+          default: false
+          description: true=忽略已 ready 状态强制重跑（默认只处理未完成阶段）
+        options:
+          type: object
+          properties:
+            asrModel:
+              type: string
+            analysisModel:
+              type: string
+            termRulesVersion:
+              type: string
+
+    ReprocessAccepted:
+      type: object
+      description: POST /calls/{callId}/reprocess 异步受理（docs/05 §2.14）
+      required: [jobId, callId, stages, status, pollUrl]
+      properties:
+        jobId:
+          type: string
+        callId:
+          type: string
+        stages:
+          type: array
+          items:
+            type: string
+            enum: [audio, transcript, analysis]
+        status:
+          type: string
+          enum: [queued]
+        pollUrl:
+          type: string
+          description: 指向 `GET /api/v1/jobs/{jobId}` 的轮询地址
+
+    SyncRequest:
+      type: object
+      description: 触发同步请求体（docs/05 §7.1）
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [incremental, full, backfill]
+        accountId:
+          type: string
+          description: 省略=全部启用账号
+        from:
+          type: string
+          format: date
+          description: 仅 backfill 用，日期区间起（含端点）
+        to:
+          type: string
+          format: date
+          description: 仅 backfill 用，日期区间止（含端点）
+        wait:
+          type: boolean
+          default: false
+          description: true 时同步等待作业结束（上限 timeoutMs）
+        timeoutMs:
+          type: integer
+          default: 30000
+          maximum: 600000
+          description: 等待上限（毫秒，≤600000）
+
+    SyncAccepted:
+      type: object
+      description: POST /sync 异步受理（docs/05 §2.14）
+      required: [jobId, type, mode, accountId, status, pollUrl]
+      properties:
+        jobId:
+          type: string
+        type:
+          type: string
+          enum: [sync]
+        mode:
+          type: string
+          enum: [incremental, full, backfill]
+        accountId:
+          type: [string, 'null']
+          description: null=全部启用账号
+        status:
+          type: string
+          enum: [queued]
+        pollUrl:
+          type: string
+          description: 指向 `GET /api/v1/jobs/{jobId}` 的轮询地址
+
+    WebhookTestRequest:
+      type: object
+      description: 测试 webhook 请求体（docs/05 §7.8）
+      required: [url, eventType]
+      properties:
+        url:
+          type: string
+          format: uri
+          pattern: '^https://'
+          description: 必须为 https URL
+        eventType:
+          type: string
+          description: 测试事件类型（见 docs/01 §7.3，示例 `call.ended`）
+
+    WebhookTestResult:
+      type: object
+      description: POST /webhooks/test 结果（docs/05 §2.14；投递失败见 error.code=UPSTREAM_UNREACHABLE 与 error.details.deliveryError）
+      required: [delivered]
+      properties:
+        delivered:
+          type: boolean
+        statusCode:
+          type: [integer, 'null']
+          minimum: 100
+          maximum: 599
+        latencyMs:
+          type: [integer, 'null']
+          minimum: 0
+        deliveryError:
+          type: [string, 'null']
+          description: 投递失败原因（失败时返回）
+
+    # ===== 词表 / 文本归一化 =====
+    TermRule:
+      type: object
+      description: 词表规则（docs/05 §2.10）
+      required: [termId, from, to, createdAt, updatedAt]
+      properties:
+        termId:
+          type: string
+          description: 规则 ID（`term_<ULID>`）
+        from:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: 变体列表（非空、去重、每项 1–32 字符，如 ["复萌","福梦","复盟"]）
+          items:
+            type: string
+            minLength: 1
+            maxLength: 32
+        to:
+          type: string
+          minLength: 1
+          maxLength: 32
+          description: 标准词（如 "孚盟"）
+        category:
+          type: [string, 'null']
+          enum: [company, product, person, custom, null]
+          description: 分类
+        priority:
+          type: [integer, 'null']
+          default: 100
+          description: 默认 100，越大越优先（冲突时高优先级先应用）
+        enabled:
+          type: [boolean, 'null']
+          default: true
+        caseSensitive:
+          type: [boolean, 'null']
+          default: false
+          description: 中文无意义，保留供英文术语
+        note:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    TermRuleInput:
+      type: object
+      description: 词表规则输入（无 termId/createdAt/updatedAt，docs/05 §2.10）
+      required: [from, to]
+      properties:
+        from:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: 变体列表（非空、去重、每项 1–32 字符）
+          items:
+            type: string
+            minLength: 1
+            maxLength: 32
+        to:
+          type: string
+          minLength: 1
+          maxLength: 32
+        category:
+          type: string
+          enum: [company, product, person, custom]
+        priority:
+          type: integer
+          default: 100
+        enabled:
+          type: boolean
+          default: true
+        caseSensitive:
+          type: boolean
+          default: false
+        note:
+          type: string
+
+    TermRuleInputPatch:
+      type: object
+      minProperties: 1
+      description: 修改词条请求体（TermRuleInput 的部分字段，docs/05 §7.9）
+      properties:
+        from:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 32
+        to:
+          type: string
+          minLength: 1
+          maxLength: 32
+        category:
+          type: string
+          enum: [company, product, person, custom]
+        priority:
+          type: integer
+        enabled:
+          type: boolean
+        caseSensitive:
+          type: boolean
+        note:
+          type: string
+
+    TermReplaceRequest:
+      type: object
+      description: 全量替换词表请求体（docs/05 §7.9）
+      required: [rules, mode]
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/TermRuleInput'
+        mode:
+          type: string
+          enum: [replace]
+
+    TermReplaceResult:
+      type: object
+      description: PUT /terms 全量替换结果（docs/05 §2.14）
+      required: [count, version]
+      properties:
+        count:
+          type: number
+          minimum: 0
+          description: 生效规则数
+        version:
+          type: string
+          description: 词表版本（时间戳，用于 reprocess 的 termRulesVersion）
+
+    NormalizeOptions:
+      type: object
+      description: 文本归一化选项（docs/05 §7.9）
+      properties:
+        includeUnchanged:
+          type: boolean
+          default: false
+        categoryFilter:
+          type: array
+          items:
+            type: string
+            enum: [company, product, person, custom]
+
+    NormalizeRequest:
+      type: object
+      description: 文本归一化请求体（docs/05 §7.9）
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        options:
+          $ref: '#/components/schemas/NormalizeOptions'
+
+    NormalizeResult:
+      type: object
+      description: POST /text/normalize 结果（docs/05 §2.14）
+      required: [original, normalized, applied, rulesVersion]
+      properties:
+        original:
+          type: string
+        normalized:
+          type: string
+        applied:
+          type: array
+          items:
+            $ref: '#/components/schemas/TermApplied'
+        rulesVersion:
+          type: string
+          description: 生效词表版本时间戳
+
+    NormalizeResponse:
+      description: 兼容旧名（docs/05 §2.14 已统一为 NormalizeResult；保留供既有引用，勿用于新代码）
+      deprecated: true
+      allOf:
+        - $ref: '#/components/schemas/NormalizeResult'

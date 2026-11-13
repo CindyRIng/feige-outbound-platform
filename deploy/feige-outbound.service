@@ -1,0 +1,30 @@
+[Unit]
+Description=feige-outbound-platform (local Feige outbound wrapper service)
+Documentation=file://%h/feige-outbound-platform/docs/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/feige-outbound-platform
+ExecStart=/usr/bin/env node --enable-source-maps dist/src/main.js serve
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+KillSignal=SIGTERM
+Environment=NODE_ENV=production
+Environment=FOP_CONFIG_DIR=%h/.config/feige-outbound
+EnvironmentFile=-%h/.config/feige-outbound/env
+# 浏览器登录需要显示；若以 user service 在有 DISPLAY 的会话中运行可省略 Xvfb
+# 若使用 Xvfb，请同时启用 feige-outbound-xvfb.service 并设置 DISPLAY=:99
+# Environment=DISPLAY=:99
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/feige-outbound %h/.config/feige-outbound %h/.cache/ms-playwright %h/.cloakbrowser
+# 需要写入浏览器 profile 时放宽：
+# ReadWritePaths=%h/.local/share/feige-outbound %h/.config/feige-outbound %h/.cache/ms-playwright %h/.cloakbrowser %h/.local/share/feige-outbound/profiles
+
+[Install]
+WantedBy=default.target
