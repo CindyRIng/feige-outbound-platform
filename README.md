@@ -12,9 +12,9 @@
 <p align="center">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green" />
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D22.5-339933" />
-  <img alt="version" src="https://img.shields.io/badge/version-0.3.1-blue" />
+  <img alt="version" src="https://img.shields.io/badge/version-0.3.2-blue" />
   <img alt="tests" src="https://img.shields.io/badge/tests-93%2F93-brightgreen" />
-  <img alt="acceptance" src="https://img.shields.io/badge/acceptance-26%2F26-brightgreen" />
+  <img alt="acceptance" src="https://img.shields.io/badge/acceptance-27%2F27-brightgreen" />
   <img alt="openapi" src="https://img.shields.io/badge/OpenAPI-3.1-85ea2d" />
 </p>
 
@@ -432,6 +432,18 @@ node scripts/reconcile.mjs            # 数据对账（--cancel-jobs 清理积�
 验收覆盖：服务/鉴权/API 发现/OpenAPI/Swagger、账号在线与 JWT、话单同步、录音归档与 Range、转写（source=asr/分段/角色/声道）、AI 分析、词表归一、呼出受理/时段/取消、错误语义、CLI/MCP、回填进度。报告见 **[docs/14-实现验收报告.md](docs/14-实现验收报告.md)**。
 
 ---
+
+## 词表维护（同音词归一）
+
+- 词表规则存于 SQLite `term_rules`，默认内置 `孚盟` 的 9 个同音变体（复萌/复盟/福萌/福盟/富盟/福梦/弗盟/孚蒙/福蒙），见 [docs/13 §5](docs/13-后处理规格（ASR与LLM）.md)。
+- 修改规则后，新转写自动生效；**历史数据**用维护脚本低成本刷新（不重跑 ASR/LLM）：
+
+```bash
+npm run terms:renormalize              # dry-run 统计
+npm run terms:renormalize -- --apply   # 应用（重算 normalizedText/full_text 与分析文本）
+```
+
+- 原文 `full_text_raw` 始终保留，可追溯 ASR 原始输出；抽查：`feige calls transcript <callId>`。
 
 ## 安全与隐私
 

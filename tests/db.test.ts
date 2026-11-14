@@ -161,15 +161,15 @@ async function seeded(): Promise<Ctx> {
 test('migrate：建 15 张表 + schema_version，幂等，统计可用', async () => {
   const ctx = await setup();
   try {
-    assert.equal(await ctx.repo.schemaVersion(), 1);
+    assert.equal(await ctx.repo.schemaVersion(), 2);
     const stats = await ctx.repo.stats();
-    assert.equal(stats.schemaVersion, 1);
+    assert.equal(stats.schemaVersion, 2);
     assert.ok(stats.sizeBytes > 0);
     assert.ok(stats.latencyMs >= 0);
     assert.ok((await ctx.repo.ping()) >= 0);
     // 幂等：重复 migrate 不报错、版本不变
     await ctx.repo.migrate();
-    assert.equal(await ctx.repo.schemaVersion(), 1);
+    assert.equal(await ctx.repo.schemaVersion(), 2);
     // 表数量校验（业务表 15 + sqlite_sequence）
     const raw = new DatabaseSync(ctx.dbPath);
     const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r: any) => r.name);
@@ -179,6 +179,10 @@ test('migrate：建 15 张表 + schema_version，幂等，统计可用', async (
       'idempotency_keys', 'audit_logs', 'schema_version'];
     for (const t of expected) assert.ok(tables.includes(t), `缺少表 ${t}`);
     assert.ok(tables.length >= expected.length + 1); // sqlite_sequence
+    // 迁移 0002：内置「孚盟」词表必须覆盖 docs/13 §5 的 9 个同音变体
+    const fumeng = (await ctx.repo.listTermRules({ enabled: true })).find(r => r.to === '孚盟');
+    assert.ok(fumeng, '缺少内置「孚盟」词条');
+    for (const v of ['复萌', '复盟', '福萌', '福盟', '富盟', '福梦', '弗盟', '孚蒙', '福蒙']) assert.ok(fumeng!.from.includes(v), `内置词表缺少变体 ${v}`);
   } finally { await teardown(ctx); }
 });
 

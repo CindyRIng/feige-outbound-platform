@@ -1,6 +1,6 @@
 {
   "name": "feige-outbound-platform",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "engines": {
@@ -22,7 +22,8 @@
     "live-dial": "node scripts/live-dial.mjs",
     "install:cli": "bash scripts/install-cli.sh",
     "docs:cli": "node scripts/gen-cli-docs.mjs",
-    "docs": "npm run build && npm run docs:cli"
+    "docs": "npm run build && npm run docs:cli",
+    "terms:renormalize": "node scripts/retro-normalize.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

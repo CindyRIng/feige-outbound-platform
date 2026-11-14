@@ -1,7 +1,7 @@
 {
-  "ts": "2026-11-14T00:55:27.179Z",
+  "ts": "2026-11-14T07:18:21.749Z",
   "api": "http://127.0.0.1:8710/api/v1",
-  "pass": 26,
+  "pass": 27,
   "fail": 0,
   "warn": 0,
   "results": [
@@ -44,7 +44,7 @@
       "id": "M5-PII",
       "name": "手机号展示策略（security.maskPhones=false）",
       "ok": true,
-      "detail": "phone=13316555434 mode=full",
+      "detail": "phone=13340685759 mode=full",
       "level": "error"
     },
     {
@@ -79,14 +79,14 @@
       "id": "M1-JWT",
       "name": "JWT 有效期 > 1 天",
       "ok": true,
-      "detail": "expiresInSec=581199",
+      "detail": "expiresInSec=558224",
       "level": "error"
     },
     {
       "id": "M2-SYNC",
       "name": "话单已同步（total>0）",
       "ok": true,
-      "detail": "total=4113",
+      "detail": "total=4119",
       "level": "error"
     },
     {
@@ -107,14 +107,14 @@
       "id": "M2-AUDIO",
       "name": "录音归档（8k/2ch WAV）",
       "ok": true,
-      "detail": "sampleRate=8000 channels=2 size=481964",
+      "detail": "sampleRate=8000 channels=2 size=332204",
       "level": "error"
     },
     {
       "id": "M4-ANALYSIS",
       "name": "AI 后处理产出（summary/intent/usage）",
       "ok": true,
-      "detail": "intent=无意向 model=deepseek-chat prompt=analysis-v1",
+      "detail": "intent=无效 model=deepseek-chat prompt=analysis-v1",
       "level": "error"
     },
     {
@@ -133,9 +133,16 @@
     },
     {
       "id": "M4-TERMS",
-      "name": "POST /text/normalize（复萌/福梦→孚盟）",
+      "name": "POST /text/normalize（9 个同音变体→孚盟）",
       "ok": true,
-      "detail": "孚盟和孚盟的系统",
+      "detail": "residual=0 normalized=孚盟和孚盟和孚盟和孚盟和孚盟和孚盟和孚盟和孚盟和…",
+      "level": "error"
+    },
+    {
+      "id": "M4-TERMS-RULES",
+      "name": "词表规则覆盖（内置 孚盟 规则含 9 个同音变体）",
+      "ok": true,
+      "detail": "aliases=9 复萌/复盟/福萌/福盟/富盟/福梦/弗盟/孚蒙/福蒙",
       "level": "error"
     },
     {
@@ -184,7 +191,7 @@
       "id": "M4-BACKFILL",
       "name": "全量回填进度（可观测）",
       "ok": true,
-      "detail": "{\"audio_ready\":1682,\"tr_ready\":1682,\"an_ready\":1667,\"total\":4114}",
+      "detail": "{\"audio_ready\":1683,\"tr_ready\":1683,\"an_ready\":1668,\"total\":4120}",
       "level": "error"
     }
   ]

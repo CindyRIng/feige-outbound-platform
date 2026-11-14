@@ -109,9 +109,15 @@ async function main() {
   // 6) 错误语义
   const nf = await req('GET', '/calls/call_NOT_EXIST');
   record('M5-ERROR', 'CALL_NOT_FOUND 404', nf.status === 404 && nf.json?.error?.code === 'CALL_NOT_FOUND', `status=${nf.status}`);
-  // 7) 词表归一工具
-  const nz = await req('POST', '/text/normalize', { text: '复萌和福梦的系统' });
-  record('M4-TERMS', 'POST /text/normalize（复萌/福梦→孚盟）', nz.status === 200 && (nz.json?.data?.normalized ?? '').includes('孚盟'), (nz.json?.data?.normalized ?? '').slice(0, 40));
+  // 7) 词表归一工具（docs/13 的 9 个同音变体必须 100% 归一）
+  const variants = ['复萌', '复盟', '福萌', '福盟', '富盟', '福梦', '弗盟', '孚蒙', '福蒙'];
+  const nz = await req('POST', '/text/normalize', { text: variants.join('和') + '都是同一家' });
+  const nzText = nz.json?.data?.normalized ?? '';
+  const residual = variants.filter(v => nzText.includes(v));
+  record('M4-TERMS', 'POST /text/normalize（9 个同音变体→孚盟）', nz.status === 200 && residual.length === 0 && nzText.includes('孚盟'), `residual=${residual.join(',') || '0'} normalized=${nzText.slice(0, 24)}…`);
+  const termRules = await req('GET', '/terms');
+  const fumengRule = (termRules.json?.data ?? []).find(r => r.to === '孚盟' && r.enabled !== false);
+  record('M4-TERMS-RULES', '词表规则覆盖（内置 孚盟 规则含 9 个同音变体）', !!fumengRule && (fumengRule?.from ?? []).length >= 9, `aliases=${(fumengRule?.from ?? []).length} ${(fumengRule?.from ?? []).join('/')}`);
   // 8) 呼出受理与时段语义（不产生真实外呼：仅 dry-run + 预约 pending 校验）
   // 每次验收使用唯一测试号码，避免冷却期/幂等冲突（预约 24h 后，绝不会被调度真实呼出）
   const testPhone = '133' + String(Date.now()).slice(-8);

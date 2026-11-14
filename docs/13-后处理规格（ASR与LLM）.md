@@ -248,6 +248,17 @@ Content-Type: application/json
 - 词表校验：`to` 不得出现在任何规则 `from` 中（防循环）；变体不得跨规则重复。
 - 可选离线任务：从转写中挖掘高频未登录词/疑似同音词 → 生成候选规则 CSV 供人工确认（不影响主流程）。
 
+> **实现现状（v0.3.2）**：内置词表种子已按上表 9 个变体落地（`0002_term_aliases.sql` 迁移 + 当前库；`0001` 保持历史原样以兼容 checksum）；并新增**低成本重归一维护脚本**（不重跑 ASR/LLM）：
+>
+> ```bash
+> npm run terms:renormalize            # dry-run：统计将变化的转写/分析
+> npm run terms:renormalize -- --apply # 落库（重算 text_normalized/full_text 与分析文本）
+> ```
+>
+> - 实测覆盖率修复：全库 1,683 条转写中，**516 条**含未覆盖变体（福盟 449 / 富盟 35 / 福蒙 37），重归一后 `normalized/fullText/分析输出` 残留 **0**，`full_text_raw` 保留原文可追溯；
+> - 改动词表后**新数据**自动生效；**历史数据**需运行上述脚本（或 `feige calls reprocess`，会重跑 ASR/LLM，成本更高）；
+> - 词表调整流程：改规则 → dry-run 检查 → `--apply` → 抽查 `feige calls transcript` / 分析关键词。
+
 ---
 
 ## 6. LLM 语义后处理规格
