@@ -449,7 +449,7 @@ npm run terms:renormalize -- --apply   # 应用（重算 normalizedText/full_tex
 
 - 默认仅监听 `127.0.0.1`，不暴露公网；若确实需要远程访问，请自行加反向代理 + TLS + 更强鉴权（v1 不支持多用户）。
 - `secrets.json`、`api-token`、浏览器 profile 均含敏感信息，权限 0600/0700，禁止提交到仓库。
-- **展示层 PII（v0.3.1）**：API/CLI 默认返回**完整手机号**（`security.maskPhones=false`，本机单用户运营）；设 `true` 可恢复打码。日志始终脱敏、发送给 DeepSeek 的分析输入默认脱敏、公开文档示例均为占位号码。
+- **展示层 PII（v0.3.1 起）**：API/CLI 默认返回**完整手机号**（`security.maskPhones=false`，本机单用户运营）；设 `true` 可恢复打码。日志始终脱敏、发送给 DeepSeek 的分析输入默认脱敏、公开文档示例均为占位号码。
 - 浏览器自动化仅用于账号登录（官方网页登录 + 滑块），请遵守上游使用条款；真实拨号会产生费用与真实电话，测试请使用可接听的号码。
 - 已知 v1 简化：JWT 以明文存于 0600 的 SQLite（`jwt_key_id=plain-v1`），后续版本支持 `FOP_SECRET_KEY` AES-256-GCM 加密。
 
