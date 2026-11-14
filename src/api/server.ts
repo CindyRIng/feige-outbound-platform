@@ -149,7 +149,7 @@ export async function createServer(s: Services): Promise<FastifyInstance> {
   app.patch('/api/v1/config', async (req, reply) => {
     const body = req.body as Record<string, any>;
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AppError('INVALID_REQUEST', '请求体必须为对象');
-    const allowed = new Set(['server','storage','browser','dial','limits','sync','pipeline','events','logging','backup','runtime']);
+    const allowed = new Set(['server','storage','browser','dial','limits','sync','pipeline','events','logging','backup','runtime','security']);
     for (const k of Object.keys(body)) if (!allowed.has(k)) throw new AppError('VALIDATION_FAILED', `未知配置节: ${k}`, { details: { fields: [{ field: k, reason: 'unknown' }] } });
     if (JSON.stringify(body).includes('"apiKey"') || JSON.stringify(body).includes('"password"')) throw new AppError('CONFIG_INVALID', '密钥字段不可通过本接口修改', { details: { readonlyFields: ['secrets'] } });
     const r = s.config.patch(body);
@@ -166,7 +166,7 @@ export async function createServer(s: Services): Promise<FastifyInstance> {
     const b = req.body as any;
     const acct = await s.accounts.create(b);
     reply.status(201);
-    return ok(req, reply, { accountId: acct.accountId, displayName: acct.displayName, upstreamUsernameMasked: acct.upstreamUsernameMasked, enabled: acct.enabled, state: acct.state, dialMode: 'callback', createdAt: acct.createdAt });
+    return ok(req, reply, { accountId: acct.accountId, displayName: acct.displayName, upstreamUsername: acct.upstreamUsername, upstreamUsernameMasked: acct.upstreamUsernameMasked, enabled: acct.enabled, state: acct.state, dialMode: 'callback', createdAt: acct.createdAt });
   });
   app.get('/api/v1/accounts/:accountId', async (req, reply) => {
     const { accountId } = req.params as any;

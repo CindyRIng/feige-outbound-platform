@@ -12,9 +12,9 @@
 <p align="center">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green" />
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D22.5-339933" />
-  <img alt="version" src="https://img.shields.io/badge/version-0.3.0-blue" />
+  <img alt="version" src="https://img.shields.io/badge/version-0.3.1-blue" />
   <img alt="tests" src="https://img.shields.io/badge/tests-93%2F93-brightgreen" />
-  <img alt="acceptance" src="https://img.shields.io/badge/acceptance-25%2F25-brightgreen" />
+  <img alt="acceptance" src="https://img.shields.io/badge/acceptance-26%2F26-brightgreen" />
   <img alt="openapi" src="https://img.shields.io/badge/OpenAPI-3.1-85ea2d" />
 </p>
 
@@ -362,7 +362,9 @@ feige completion bash              # shell 补全
 | `FOP_ASR_MODEL` | `asr-1.0` | ASR 模型 |
 | `FOP_ANALYSIS_MODEL` | `deepseek-chat` | 分析模型（升级模型 `deepseek-v4-pro`） |
 | `FOP_LOG_LEVEL` | `info` | `debug|info|warn|error` |
+| `security.maskPhones` | `false` | 配置项：`false`=API/CLI 显示完整号码（默认）；`true`=脱敏 |
 | `FOP_OPENAPI_FILE` | 自动探测 | OpenAPI 契约文件路径 |
+| `FOP_MASK_PHONES` | `false` | 展示层手机号脱敏（true=打码；默认完整号码） |
 
 ### 环境变量（CLI）
 
@@ -435,7 +437,7 @@ node scripts/reconcile.mjs            # 数据对账（--cancel-jobs 清理积�
 
 - 默认仅监听 `127.0.0.1`，不暴露公网；若确实需要远程访问，请自行加反向代理 + TLS + 更强鉴权（v1 不支持多用户）。
 - `secrets.json`、`api-token`、浏览器 profile 均含敏感信息，权限 0600/0700，禁止提交到仓库。
-- 日志/API 输出对手机号、JWT、API key 做脱敏；上游原始对象只在显式 `includeRaw` 时返回。
+- **展示层 PII（v0.3.1）**：API/CLI 默认返回**完整手机号**（`security.maskPhones=false`，本机单用户运营）；设 `true` 可恢复打码。日志始终脱敏、发送给 DeepSeek 的分析输入默认脱敏、公开文档示例均为占位号码。
 - 浏览器自动化仅用于账号登录（官方网页登录 + 滑块），请遵守上游使用条款；真实拨号会产生费用与真实电话，测试请使用可接听的号码。
 - 已知 v1 简化：JWT 以明文存于 0600 的 SQLite（`jwt_key_id=plain-v1`），后续版本支持 `FOP_SECRET_KEY` AES-256-GCM 加密。
 

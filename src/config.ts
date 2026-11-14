@@ -27,6 +27,7 @@ export function defaultConfig(): Config {
     },
     events: { sseHeartbeatMs: 15000, webhooks: [] },
     logging: { level: 'info' },
+    security: { maskPhones: false },
     backup: { includeAsrChunks: false },
     runtime: { keepAliveMs: 60000, jobLeaseMs: 300000 },
   };
@@ -64,6 +65,7 @@ export class ConfigStore {
     if (process.env.FOP_ASR_MODEL) this.cfg.pipeline.asr.model = process.env.FOP_ASR_MODEL;
     if (process.env.FOP_ANALYSIS_MODEL) this.cfg.pipeline.analysis.model = process.env.FOP_ANALYSIS_MODEL;
     if (process.env.FOP_LOG_LEVEL) this.cfg.logging.level = process.env.FOP_LOG_LEVEL as any;
+    if (process.env.FOP_MASK_PHONES !== undefined) this.cfg.security.maskPhones = /^(1|true|yes|on)$/i.test(process.env.FOP_MASK_PHONES);
   }
   get(): Config { return this.cfg; }
   secrets(): Secrets { return this.sec; }
@@ -90,7 +92,7 @@ export class ConfigStore {
     }
   }
   patch(patch: Record<string, any>): { config: Config; restartRequired: boolean } {
-    const allowed = new Set(['server','storage','browser','dial','limits','sync','pipeline','events','logging','backup','runtime']);
+    const allowed = new Set(['server','storage','browser','dial','limits','sync','pipeline','events','logging','backup','runtime','security']);
     for (const k of Object.keys(patch)) if (!allowed.has(k)) throw new AppError('VALIDATION_FAILED', `未知配置节: ${k}`, { details: { fields: [{ field: k, reason: 'unknown' }] } });
     const before = JSON.stringify(this.cfg);
     const merged = deepMerge(this.cfg, patch);

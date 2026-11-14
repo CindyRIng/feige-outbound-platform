@@ -18,3 +18,10 @@ export function maskName(name: string | null | undefined, enabled: boolean): str
   if (!enabled) return name;
   return name.length <= 1 ? '*' : name[0] + '*'.repeat(Math.max(1, name.length - 1));
 }
+
+/** 展示层手机号：mask=false 返回完整号码（默认，本机单用户运营）；mask=true 返回脱敏值。 */
+export function displayPhone(input: string | null | undefined, mask: boolean): string {
+  const v = String(input ?? '').trim();
+  if (!v) return '';
+  return mask ? maskPhone(v) : v;
+}

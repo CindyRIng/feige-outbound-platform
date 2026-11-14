@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: 飞鸽外呼本地平台（FOP）REST v1 API
-  version: 0.3.0
+  version: 0.3.1
   summary: REST v1 机器可读契约（35 个操作）
   description: |
     本文件是 `docs/05-对外API契约.md` 的机器可读副本（OpenAPI 3.1）；人类可读权威契约以
@@ -11,6 +11,7 @@ info:
 
     - Base URL：`http://127.0.0.1:8710/api/v1`（默认仅监听 127.0.0.1，端口可配置）。
     - 认证：所有操作需要 `Authorization: Bearer <localApiToken>`（见 securitySchemes.bearerAuth）。
+    - PII 展示：v0.3.1 起默认返回**完整手机号**（`security.maskPhones=false`，本机单用户运营）；配置为 true 时返回脱敏值。本文示例统一使用脱敏占位。
     - 封套：成功 `{ ok: true, data, meta }`；失败 `{ ok: false, error, meta }`；`meta.pagination` 仅列表接口出现。
     - 错误码：`ErrorObject.code` 枚举来自 `docs/01-决策与约定.md` §5.4（40 个稳定码，新增只增不改；
       适配层/后台作业的内部错误码不对外，必须归一为上述稳定码之一（docs/01 §5.4 注））；
@@ -179,6 +180,7 @@ paths:
                       accountsDetail:
                         - accountId: main
                           displayName: 主账号
+                          upstreamUsername: "138****0000"
                           upstreamUsernameMasked: "156****0075"
                           upstreamUserId: "1001"
                           tenantCode: "24421"
@@ -3570,7 +3572,7 @@ components:
     AccountSummary:
       type: object
       description: 账号摘要（docs/05 §2.2）
-      required: [accountId, displayName, upstreamUsernameMasked, dialMode, enabled, state, stats, createdAt, updatedAt]
+      required: [accountId, displayName, upstreamUsername, upstreamUsernameMasked, dialMode, enabled, state, stats, createdAt, updatedAt]
       properties:
         accountId:
           type: string
@@ -3580,9 +3582,13 @@ components:
           type: string
           minLength: 1
           maxLength: 64
+        upstreamUsername:
+          type: string
+          description: 完整上游登录手机号（security.maskPhones=false 默认；=true 时与 upstreamUsernameMasked 相同）
+          example: "138****0000"
         upstreamUsernameMasked:
           type: string
-          description: 脱敏上游登录手机号（如 `156****0075`）
+          description: 上游登录手机号脱敏值（如 `156****0075`；保留用于脱敏模式/兼容）
           example: "156****0075"
         upstreamUserId:
           type: [string, 'null']
@@ -3882,13 +3888,17 @@ components:
 
     AccountCreateResult:
       type: object
-      description: POST /accounts 创建结果（docs/05 §2.14；不返回密码/手机号明文）
-      required: [accountId, displayName, upstreamUsernameMasked, enabled, state, dialMode, createdAt]
+      description: POST /accounts 创建结果（docs/05 §2.14；不返回密码；手机号默认完整，security.maskPhones=true 时脱敏）
+      required: [accountId, displayName, upstreamUsername, upstreamUsernameMasked, enabled, state, dialMode, createdAt]
       properties:
         accountId:
           type: string
         displayName:
           type: string
+        upstreamUsername:
+          type: string
+          example: "138****0000"
+          description: 完整上游登录手机号（security.maskPhones=false 默认）
         upstreamUsernameMasked:
           type: string
           example: "156****0075"

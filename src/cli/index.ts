@@ -15,7 +15,6 @@ function str(v: unknown): string | undefined { return typeof v === 'string' && v
 function num(v: unknown): number | undefined { if (v === undefined || v === null || v === '') return undefined; const n = Number(v); return Number.isFinite(n) ? n : undefined; }
 function collect(val: string, prev: string[] = []): string[] { return [...(Array.isArray(prev) ? prev : []), val]; }
 function splitCsv(v: unknown): string[] { const s = str(v); return s ? s.split(',').map(x => x.trim()).filter(Boolean) : []; }
-function maskPhone(p: string): string { return p.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2'); }
 
 function globals(cmd: Command): GlobalOpts {
   const o = cmd.optsWithGlobals() as Record<string, unknown>;
@@ -389,8 +388,8 @@ export function buildProgram(state: CliState): Command {
       if (password && (password.length < 8 || password.length > 64)) throw new CliError('VALIDATION_FAILED', '密码长度需 8–64');
       const metadata = metadataOf(opts.metadata as string[]);
       if (opts.dryRun) {
-        emitLocal(cmd, { dryRun: true, accountId, usernameMasked: maskPhone(username), displayName: str(opts.displayName) ?? accountId },
-          () => writeLine(`预检通过（未创建）：accountId=${accountId} username=${maskPhone(username)}`));
+        emitLocal(cmd, { dryRun: true, accountId, username, displayName: str(opts.displayName) ?? accountId },
+          () => writeLine(`预检通过（未创建）：accountId=${accountId} username=${username}`));
         return;
       }
       const body: Record<string, unknown> = {
@@ -400,7 +399,7 @@ export function buildProgram(state: CliState): Command {
         ...(metadata ? { metadata } : {}),
       };
       const res = await api(cmd).post<Record<string, any>>('/accounts', body);
-      emit(cmd, res, d => { writeLine(`✔ 账号已创建  ${oneLine(d.accountId)}`); kv([['展示名', oneLine(d.displayName)], ['上游手机', oneLine(d.upstreamUsernameMasked)], ['状态', oneLine(d.state)], ['下一步', `feige account login ${oneLine(d.accountId)}`]]); });
+      emit(cmd, res, d => { writeLine(`✔ 账号已创建  ${oneLine(d.accountId)}`); kv([['展示名', oneLine(d.displayName)], ['上游手机', oneLine(d.upstreamUsername ?? d.upstreamUsernameMasked)], ['状态', oneLine(d.state)], ['下一步', `feige account login ${oneLine(d.accountId)}`]]); });
     });
   addCommonOptions(accountCmd.command('update').description('更新账号（PATCH /accounts/{id}）').argument('<accountId>')
     .option('--display-name <name>', '展示名')
@@ -506,7 +505,7 @@ export function buildProgram(state: CliState): Command {
         ...(str(opts.scheduledAt) ? { scheduledAt: str(opts.scheduledAt) } : {}),
         ...(opts.dryRun ? { dryRun: true } : {}),
       };
-      if (!opts.dryRun) await confirmOrThrow(`向 ${maskPhone(to)} 发起真实外呼（可能产生话费，需坐席手机接听）`, globals(cmd));
+      if (!opts.dryRun) await confirmOrThrow(`向 ${to} 发起真实外呼（可能产生话费，需坐席手机接听）`, globals(cmd));
       const headers: Record<string, string> = {};
       if (str(opts.idempotencyKey)) headers['Idempotency-Key'] = String(opts.idempotencyKey);
       const res = await api(cmd).post<Record<string, any>>('/calls', body, { headers });

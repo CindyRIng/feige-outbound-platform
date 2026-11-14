@@ -2,7 +2,9 @@
 
 > 本文是北向 REST 接口的**人类可读权威契约**；机器可读副本见 [../spec/openapi.yaml](../spec/openapi.yaml)（两者必须一致，冲突时以本文 + [01-决策与约定.md](./01-决策与约定.md) 为准）。
 >
-> 状态：v0.2（2026-11-14；v0.3.0 增补运行时文档端点）｜Base URL：`http://127.0.0.1:8710/api/v1`
+> 状态：v0.3.1（2026-11-14；v0.3.0 增补运行时文档端点；v0.3.1 调整 PII 展示策略）｜Base URL：`http://127.0.0.1:8710/api/v1`
+>
+> **PII 展示策略（v0.3.1）**：默认 `security.maskPhones=false` → API/CLI 返回**完整手机号**（本机单用户运营；日志始终脱敏，AI 分析输入仍脱敏）；设为 `true` 时恢复打码。本文示例为脱敏占位。
 > 通用约定（认证/封套/错误码/分页/时间/幂等/限流）见 [01-决策与约定.md](./01-决策与约定.md) §5；本文只定义**字段与行为**。
 
 ---
@@ -81,7 +83,8 @@
 | --- | --- | --- |
 | `accountId` | string | 账号 slug |
 | `displayName` | string | 展示名 |
-| `upstreamUsernameMasked` | string | 脱敏上游登录手机号（`156****0075`） |
+| `upstreamUsername` | string | **完整上游登录手机号**（默认；`security.maskPhones=true` 时为脱敏值） |
+| `upstreamUsernameMasked` | string | 脱敏上游登录手机号（`156****0075`；兼容字段，两种模式都返回） |
 | `upstreamUserId` | string? | 上游 userId |
 | `tenantCode` | string? | 上游租户编码 |
 | `enterpriseName` | string? | 上游企业名 |
@@ -347,7 +350,7 @@ DialWindow：
 | --- | --- | --- |
 | `CallAccepted` | = `CallSummary`（呼出受理响应） | `POST /calls` 201/202 |
 | `DryRunResult` | `{ dryRun: true, willDial: boolean, accountId, to, dialWindow: DialWindow, warnings: string[], estimatedCost?: number }` | `POST /calls?dryRun` |
-| `AccountCreateResult` | `{ accountId, displayName, upstreamUsernameMasked, enabled, state, dialMode, createdAt }` | `POST /accounts` 201 |
+| `AccountCreateResult` | `{ accountId, displayName, upstreamUsername, upstreamUsernameMasked, enabled, state, dialMode, createdAt }` | `POST /accounts` 201 |
 | `AccountLoginResult` | `{ accountId, state, loggedIn: boolean, jwtExpiresAt?: string, loginJobId }` | `POST /accounts/{id}/login` wait=true 200 |
 | `AccountLoginAccepted` | `{ loginJobId, status: "queued", pollUrl: string }` | `POST /accounts/{id}/login` wait=false 202 |
 | `SyncAccepted` | `{ jobId, type: "sync", mode: "incremental"|"full"|"backfill", accountId: string|null, status: "queued", pollUrl: string }` | `POST /sync` 202 |
@@ -524,7 +527,7 @@ JSON Merge Patch（RFC 7386 语义：对象递归合并；显式 `null` 删除�
 **响应 201**
 
 ```jsonc
-{ "ok": true, "data": { "accountId": "main", "displayName": "主账号", "upstreamUsernameMasked": "156****0075", "enabled": true, "state": "unknown", "dialMode": "callback", "createdAt": "2026-11-14T10:00:00+08:00" }, "meta": { "requestId": "req_...", "ts": "..." } }
+{ "ok": true, "data": { "accountId": "main", "displayName": "主账号", "upstreamUsername": "138****0000", "upstreamUsernameMasked": "156****0075", "enabled": true, "state": "unknown", "dialMode": "callback", "createdAt": "2026-11-14T10:00:00+08:00" }, "meta": { "requestId": "req_...", "ts": "..." } }
 ```
 
 **错误**：`VALIDATION_FAILED`（字段非法或 `accountId` 已存在，`details.fields[]` 指明重复字段）、`CONFIG_INVALID`（配置层拒绝，如 profile 目录不可用）、`UNAUTHORIZED`、`INTERNAL_ERROR`

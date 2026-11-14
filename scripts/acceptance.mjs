@@ -52,6 +52,13 @@ async function main() {
   const docsHtml = await docsRes.text().catch(() => '');
   const cssRes = await fetch(API + '/docs/swagger-ui.css', { signal: AbortSignal.timeout(10000) });
   record('M5-SWAGGER', 'Swagger UI 页面与静态资源（/docs）', docsRes.status === 200 && docsHtml.includes('swagger-ui') && cssRes.status === 200, `html=${docsRes.status} css=${cssRes.status}`);
+  // 1.6) PII 展示策略（v0.3.1：默认完整号码；security.maskPhones=true 时脱敏）
+  const cfgForPii = await req('GET', '/config');
+  const maskPhones = cfgForPii.json?.data?.security?.maskPhones === true;
+  const piiCalls = await req('GET', '/calls?size=1');
+  const piiPhone = piiCalls.json?.data?.[0]?.to?.phone ?? '';
+  const piiOk = maskPhones ? piiPhone.includes('****') || piiPhone === '' : /^1[3-9]\d{9}$/.test(piiPhone);
+  record('M5-PII', `手机号展示策略（security.maskPhones=${maskPhones}）`, !!piiCalls.json?.data?.[0] && piiOk, `phone=${piiPhone} mode=${maskPhones ? 'masked' : 'full'}`);
   // 2) status / db / accounts
   const st = await req('GET', '/status');
   const sd = st.json?.data ?? {};

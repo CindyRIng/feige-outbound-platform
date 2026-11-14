@@ -2,6 +2,14 @@
 
 本项目遵循语义化版本（SemVer）。日期均为 Asia/Shanghai。
 
+## v0.3.1 — 2026-11-14
+
+### Changed
+- **PII 展示策略（业务决策）**：API/CLI 默认返回**完整手机号**（`security.maskPhones=false`，默认）；新增配置开关 `security.maskPhones` 与 `FOP_MASK_PHONES`，设为 `true` 时恢复现有脱敏行为。
+- 账号 DTO 新增 `upstreamUsername`（完整），保留 `upstreamUsernameMasked`（兼容）；话单 `to.phone`/`from.phone`/`lineNumber`、详情 `upstream.telA/telB` 默认完整。
+- **不改变**：日志始终脱敏；发送给 DeepSeek 的分析元数据仍按 `pipeline.analysis.redactPhones` 脱敏；公开文档示例继续使用占位号码。
+- 文档同步：docs/01/05/11/14/15、README、OpenAPI spec。
+
 ## v0.3.0 — 2026-11-14
 
 面向公开交付的版本：可运行平台 + 完整 CLI/MCP/SKILL + OpenAPI 运行时文档 + 安装部署手册 + MIT License。

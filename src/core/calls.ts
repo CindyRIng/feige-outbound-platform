@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { AppError } from '../errors.js';
 import { newAuditId, newCallId } from './ids.js';
 import { dialWindow } from './time.js';
-import { isValidPhone, normalizePhone, maskPhone } from '../util/phone.js';
+import { isValidPhone, normalizePhone, maskPhone, displayPhone } from '../util/phone.js';
 import { safeJson } from './jobs.js';
 
 export interface CallsSvcDeps {
@@ -169,6 +169,7 @@ export class CallsService {
   }
 
   async toSummary(c: Call): Promise<CallSummary> {
+    const mask = !!this.d.config.get().security?.maskPhones;
     const up = safeJson<{ callStatus?: number; callStatusName?: string; finishStatus?: number; finishStatusName?: string }>(c.upstreamStatusJson);
     let preview: string | null = null;
     if (c.transcriptStatus === 'ready') {
@@ -177,9 +178,9 @@ export class CallsService {
     }
     return {
       callId: c.callId, accountId: c.accountId, upstreamCallId: c.upstreamCallId ?? null, direction: 'outbound',
-      to: { phone: maskPhone(c.toPhone), location: c.toLocation ?? null },
-      from: { phone: maskPhone(c.fromPhone), location: c.fromLocation ?? null },
-      lineNumber: c.lineNumber ? maskPhone(c.lineNumber) : null, customerName: c.customerName ?? null,
+      to: { phone: displayPhone(c.toPhone, mask), location: c.toLocation ?? null },
+      from: { phone: displayPhone(c.fromPhone, mask), location: c.fromLocation ?? null },
+      lineNumber: displayPhone(c.lineNumber, mask) || null, customerName: c.customerName ?? null,
       lineId: c.lineId ?? null, lineName: c.lineName ?? null,
       status: c.status, statusReason: c.statusReason ?? null,
       dialedAt: c.dialedAt ?? null, answeredAt: c.answeredAt ?? null, endedAt: c.endedAt ?? null,
@@ -198,9 +199,10 @@ export class CallsService {
     const a = await this.d.repo.getCurrentAnalysis(c.callId);
     const up = safeJson<Record<string, unknown>>(c.upstreamStatusJson) ?? {};
     const raw = opts.includeRaw ? safeJson<Record<string, unknown>>(c.upstreamRawJson) ?? null : undefined;
+    const mask = !!this.d.config.get().security?.maskPhones;
     const detail: CallDetail = {
       ...summary,
-      upstream: { ...up, telA: c.fromPhone ? maskPhone(c.fromPhone) : null, telB: maskPhone(c.toPhone), ...(raw ? { raw } : {}) },
+      upstream: { ...up, telA: displayPhone(c.fromPhone, mask) || null, telB: displayPhone(c.toPhone, mask), ...(raw ? { raw } : {}) },
       timeline: { createdAt: c.createdAt, submittedAt: c.submittedAt ?? null, dialingAt: c.dialedAt ?? c.submittedAt ?? null, connectedAt: c.answeredAt ?? null, endedAt: c.endedAt ?? null },
       pipelineDetail: {
         audio: { status: c.audioStatus, audioId: audio?.audioId ?? null, downloadedAt: audio?.downloadedAt ?? null, lastError: null },

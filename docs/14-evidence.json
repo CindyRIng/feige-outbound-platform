@@ -1,7 +1,7 @@
 {
-  "ts": "2026-11-14T00:31:13.671Z",
+  "ts": "2026-11-14T00:55:27.179Z",
   "api": "http://127.0.0.1:8710/api/v1",
-  "pass": 25,
+  "pass": 26,
   "fail": 0,
   "warn": 0,
   "results": [
@@ -41,6 +41,13 @@
       "level": "error"
     },
     {
+      "id": "M5-PII",
+      "name": "手机号展示策略（security.maskPhones=false）",
+      "ok": true,
+      "detail": "phone=13316555434 mode=full",
+      "level": "error"
+    },
+    {
       "id": "M1-STATUS",
       "name": "GET /status（db/账号/时段/队列）",
       "ok": true,
@@ -72,14 +79,14 @@
       "id": "M1-JWT",
       "name": "JWT 有效期 > 1 天",
       "ok": true,
-      "detail": "expiresInSec=582652",
+      "detail": "expiresInSec=581199",
       "level": "error"
     },
     {
       "id": "M2-SYNC",
       "name": "话单已同步（total>0）",
       "ok": true,
-      "detail": "total=4111",
+      "detail": "total=4113",
       "level": "error"
     },
     {
@@ -177,7 +184,7 @@
       "id": "M4-BACKFILL",
       "name": "全量回填进度（可观测）",
       "ok": true,
-      "detail": "{\"audio_ready\":1682,\"tr_ready\":1682,\"an_ready\":1667,\"total\":4112}",
+      "detail": "{\"audio_ready\":1682,\"tr_ready\":1682,\"an_ready\":1667,\"total\":4114}",
       "level": "error"
     }
   ]

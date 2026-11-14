@@ -6,7 +6,7 @@ import { AppError } from '../errors.js';
 import { EventBus } from './events.js';
 import { JobQueue } from './jobs.js';
 import { dialWindow } from './time.js';
-import { maskPhone } from '../util/phone.js';
+import { maskPhone, displayPhone } from '../util/phone.js';
 import type { Logger } from '../logger.js';
 import type { UpstreamClient, LoginResult, UpstreamLine } from '../upstream/types.js';
 import { newAuditId } from './ids.js';
@@ -255,7 +255,9 @@ export class AccountService {
     const stats = await this.d.repo.accountStats(a.accountId);
     const line = this.lineCache.get(a.accountId) ?? (a.lineId ? { lineId: a.lineId, lineName: a.lineName ?? '', mode: a.lineMode ?? 1 } : null);
     return {
-      accountId: a.accountId, displayName: a.displayName, upstreamUsernameMasked: maskPhone(a.upstreamUsername),
+      accountId: a.accountId, displayName: a.displayName,
+      upstreamUsername: displayPhone(a.upstreamUsername, !!this.d.config.get().security?.maskPhones),
+      upstreamUsernameMasked: maskPhone(a.upstreamUsername),
       upstreamUserId: a.upstreamUserId ?? null, tenantCode: a.tenantCode ?? null, enterpriseName: a.enterpriseName ?? null,
       realName: a.realName ?? null, dialMode: 'callback', line,
       enabled: a.enabled, state: a.state, jwtExpiresAt: a.jwtExpiresAt ?? null,

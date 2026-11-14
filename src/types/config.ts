@@ -13,6 +13,8 @@ export interface Config {
   };
   events: { sseHeartbeatMs: number; webhooks: { url: string; eventTypes: string[]; enabled: boolean; timeoutMs?: number | null }[] };
   logging: { level: 'debug'|'info'|'warn'|'error' };
+  /** 展示层 PII 策略：false（默认）= API/CLI 返回完整手机号；true=打码（日志始终打码） */
+  security: { maskPhones: boolean };
   backup: { includeAsrChunks: boolean };
   runtime: { keepAliveMs: number; jobLeaseMs: number };
 }

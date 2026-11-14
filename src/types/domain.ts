@@ -306,7 +306,7 @@ export interface IdempotencyRecord {
 
 // ---------- API DTO ----------
 export interface AccountSummary {
-  accountId: string; displayName: string; upstreamUsernameMasked: string; upstreamUserId?: string | null;
+  accountId: string; displayName: string; /** 完整上游登录手机号（security.maskPhones=false 时） */ upstreamUsername: string; upstreamUsernameMasked: string; upstreamUserId?: string | null;
   tenantCode?: string | null; enterpriseName?: string | null; realName?: string | null;
   dialMode: 'callback'; line?: { lineId: string; lineName: string; mode: number } | null;
   enabled: boolean; state: AccountState; jwtExpiresAt?: IsoDateTime | null;
@@ -411,7 +411,7 @@ export interface StatusPayload {
   events: { sseClients: number };
   limits: { apiQps: number; perAccountConcurrency: number; globalConcurrency: number; dialCooldownMs: number };
 }
-export interface AccountCreateResult { accountId: string; displayName: string; upstreamUsernameMasked: string; enabled: boolean; state: AccountState; dialMode: 'callback'; createdAt: IsoDateTime; }
+export interface AccountCreateResult { accountId: string; displayName: string; upstreamUsername: string; upstreamUsernameMasked: string; enabled: boolean; state: AccountState; dialMode: 'callback'; createdAt: IsoDateTime; }
 export interface AccountLoginResult { accountId: string; state: AccountState; loggedIn: boolean; jwtExpiresAt?: IsoDateTime | null; loginJobId: string; }
 export interface AccountLoginAccepted { loginJobId: string; status: JobStatus; pollUrl: string; }
 export interface CallAccepted extends CallSummary {}
