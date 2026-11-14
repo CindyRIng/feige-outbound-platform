@@ -3,12 +3,13 @@
 const argv = process.argv.slice(2);
 async function main(): Promise<number> {
   const cmd = argv[0] ?? 'help';
-  if (cmd === 'serve') {
+  const wantsHelp = argv.includes('--help') || argv.includes('-h') || argv.includes('--help-all');
+  if (cmd === 'serve' && !wantsHelp) {
     const { startServer } = await import('./serve.js');
     await startServer(argv.slice(1));
     return 0;
   }
-  if (cmd === 'mcp') {
+  if (cmd === 'mcp' && !wantsHelp) {
     const { runMcp } = await import('./cli/mcp.js');
     await runMcp(argv.slice(1));
     return 0;

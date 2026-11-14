@@ -19,7 +19,7 @@ import { createAnalysisClient } from './media/analysis.js';
 import { createServer } from './api/server.js';
 import type { Services } from './api/context.js';
 
-const VERSION = '0.2.0';
+import { VERSION } from './version.js';
 const UPSTREAM_BASE = process.env.FOP_UPSTREAM_BASE_URL ?? 'https://feige.duofangtongxin.com/duofang-feige-admin';
 
 export async function startServer(args: string[] = []): Promise<void> {

@@ -1,5 +1,10 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import { createReadStream, statSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import YAML from 'yaml';
+import { VERSION } from '../version.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Services } from './context.js';
 import { AppError, asAppError } from '../errors.js';
@@ -25,8 +30,12 @@ export async function createServer(s: Services): Promise<FastifyInstance> {
     (req as any).requestId = rid;
     reply.header('X-Request-Id', rid);
     reply.header('X-Api-Version', '1');
-    // auth（全部接口含 /health 都需要 token）
-    if (req.url.startsWith('/api/v1/')) {
+    // auth：业务接口全部需要 token；仅 OpenAPI/Swagger 文档与 API 发现页公开（服务默认只监听 127.0.0.1）
+    const pathOnly = req.url.split('?')[0];
+    const isPublicDoc = pathOnly === '/api/v1' || pathOnly === '/api/v1/' || pathOnly === '/api/v1/openapi.json'
+      || pathOnly === '/api/v1/openapi.yaml' || pathOnly === '/api/v1/docs' || pathOnly === '/api/v1/docs/'
+      || pathOnly.startsWith('/api/v1/docs/');
+    if (req.url.startsWith('/api/v1/') && !isPublicDoc) {
       const auth = String(req.headers.authorization ?? '');
       const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
       if (!tokenOk(token, s.token)) throw new AppError('UNAUTHORIZED', '本地 API token 缺失或错误');
@@ -41,11 +50,94 @@ export async function createServer(s: Services): Promise<FastifyInstance> {
     if (!e) e = new AppError('INTERNAL_ERROR', (err as Error)?.message ?? 'unknown');
     void reply.status(e.httpStatus).send(errorBody(e, (req as any).requestId ?? newRequestId()));
   });
+  app.get('/favicon.ico', async (_req, reply) => reply.status(204).send());
+  app.get('/api/v1/docs/favicon.ico', async (_req, reply) => reply.status(204).send());
   app.setNotFoundHandler((req, reply) => reply.status(404).send(errorBody(new AppError('NOT_FOUND', `接口不存在: ${req.method} ${req.url}`), (req as any).requestId ?? newRequestId())));
 
   const meta = (req: FastifyRequest, pagination?: Pagination, extra: Record<string, unknown> = {}) => ({ requestId: (req as any).requestId, ts: new Date().toISOString(), ...(pagination ? { pagination } : {}), ...extra });
   const ok = (req: FastifyRequest, reply: FastifyReply, data: unknown, pagination?: Pagination, extra: Record<string, unknown> = {}) => reply.send({ ok: true, data, meta: meta(req, pagination, extra) });
   const paging = (page: number, size: number, total: number): Pagination => ({ page, size, total, totalPages: Math.max(1, Math.ceil(total / size)) });
+
+  // ---------------- OpenAPI / Swagger UI（运行时文档，无需 token） ----------------
+  const openapi = loadOpenApiSpec();
+  const swaggerDir = resolveSwaggerUiDir();
+  app.get('/api/v1', async (_req, reply) => reply.send({
+    ok: true,
+    data: {
+      name: 'feige-outbound-platform', version: VERSION, apiVersion: 'v1',
+      docs: '/api/v1/docs', openapi: '/api/v1/openapi.json', openapiYaml: '/api/v1/openapi.yaml', health: '/api/v1/health',
+      note: '业务接口均需 Authorization: Bearer <localApiToken>；文档端点公开（服务默认仅监听 127.0.0.1）',
+    },
+    meta: { ts: new Date().toISOString() },
+  }));
+  app.get('/api/v1/openapi.json', async (_req, reply) => {
+    if (!openapi) throw new AppError('SERVICE_UNAVAILABLE', 'OpenAPI 契约文件未找到（spec/openapi.yaml）', { details: { hint: '设置 FOP_OPENAPI_FILE 或从仓库根目录启动' } });
+    return reply.type('application/json; charset=utf-8').header('Cache-Control', 'no-cache').send(JSON.stringify(openapi.json));
+  });
+  app.get('/api/v1/openapi.yaml', async (_req, reply) => {
+    if (!openapi) throw new AppError('SERVICE_UNAVAILABLE', 'OpenAPI 契约文件未找到（spec/openapi.yaml）');
+    return reply.type('application/yaml; charset=utf-8').header('Cache-Control', 'no-cache').send(openapi.yamlText);
+  });
+  const docsHtml = (): string => `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>飞鸽外呼本地平台 REST v1 · API 文档</title>
+<link rel="stylesheet" href="/api/v1/docs/swagger-ui.css"/>
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif}
+  .fop-banner{padding:10px 18px;background:#0b3d91;color:#fff;font-size:13px;line-height:1.6}
+  .fop-banner code{background:rgba(255,255,255,.15);padding:1px 6px;border-radius:4px}
+  .fop-banner a{color:#9fd0ff}
+</style>
+</head>
+<body>
+<div class="fop-banner">
+  <b>feige-outbound-platform REST v1</b> · OpenAPI 3.1 · 共 35 个操作 ·
+  <a href="/api/v1/openapi.yaml" target="_blank">下载 openapi.yaml</a> ·
+  <a href="/api/v1/openapi.json" target="_blank">openapi.json</a><br/>
+  业务接口需鉴权：点击右上角 <b>Authorize</b> 填入本地 API token（<code>~/.config/feige-outbound/api-token</code>），或访问 <code>/api/v1/docs?token=&lt;token&gt;</code> 自动注入。默认仅监听 127.0.0.1。
+</div>
+<div id="swagger-ui"></div>
+<script src="/api/v1/docs/swagger-ui-bundle.js"></script>
+<script src="/api/v1/docs/swagger-ui-standalone-preset.js"></script>
+<script>
+(function(){
+  var q = new URLSearchParams(location.search);
+  var t = q.get('token') || localStorage.getItem('fop_api_token') || '';
+  if (q.get('token')) localStorage.setItem('fop_api_token', q.get('token'));
+  window.ui = SwaggerUIBundle({
+    url: '/api/v1/openapi.json',
+    dom_id: '#swagger-ui',
+    deepLinking: true,
+    persistAuthorization: true,
+    presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+    plugins: [SwaggerUIBundle.plugins.DownloadUrl],
+    layout: 'StandaloneLayout',
+    requestInterceptor: function(req){ if (t) req.headers.Authorization = 'Bearer ' + t; return req; }
+  });
+})();
+</script>
+</body>
+</html>`;
+  app.get('/api/v1/docs', async (_req, reply) => reply.type('text/html; charset=utf-8').header('Cache-Control', 'no-cache').send(docsHtml()));
+  app.get('/api/v1/docs/', async (_req, reply) => reply.redirect('/api/v1/docs'));
+  const swaggerAssets: Record<string, string> = {
+    'swagger-ui.css': 'text/css; charset=utf-8',
+    'swagger-ui-bundle.js': 'application/javascript; charset=utf-8',
+    'swagger-ui-standalone-preset.js': 'application/javascript; charset=utf-8',
+    'favicon-32x32.png': 'image/png', 'favicon-16x16.png': 'image/png',
+  };
+  app.get('/api/v1/docs/:asset', async (req, reply) => {
+    const asset = String((req.params as any).asset ?? '');
+    const mime = swaggerAssets[asset];
+    if (!mime) throw new AppError('NOT_FOUND', `未知文档资源: ${asset}`);
+    if (!swaggerDir) throw new AppError('SERVICE_UNAVAILABLE', 'swagger-ui-dist 未安装（npm install）');
+    const file = join(swaggerDir, asset);
+    if (!existsSync(file)) throw new AppError('SERVICE_UNAVAILABLE', `Swagger UI 资源缺失: ${asset}`);
+    return reply.type(mime).header('Cache-Control', 'public, max-age=3600').send(readFileSync(file));
+  });
 
   // ---------------- platform ----------------
   app.get('/api/v1/health', async (req, reply) => ok(req, reply, await s.status.health()));
@@ -308,4 +400,36 @@ function redactConfig(cfg: { get(): any }): Record<string, unknown> {
   const c = JSON.parse(JSON.stringify(cfg.get()));
   if (c?.events?.webhooks) c.events.webhooks = c.events.webhooks.map((w: any) => ({ ...w, ...(w.secret ? { secret: '***' } : {}) }));
   return c;
+}
+
+
+/** 解析 OpenAPI 契约（spec/openapi.yaml），支持环境变量/仓库根/dist 多候选。 */
+function loadOpenApiSpec(): { json: Record<string, unknown>; yamlText: string; source: string } | null {
+  const here = fileURLToPath(import.meta.url);
+  const candidates = [
+    process.env.FOP_OPENAPI_FILE,
+    join(process.cwd(), 'spec', 'openapi.yaml'),
+    join(process.cwd(), 'dist', 'spec', 'openapi.yaml'),
+    fileURLToPath(new URL('../../spec/openapi.yaml', import.meta.url)),
+    fileURLToPath(new URL('../../../spec/openapi.yaml', import.meta.url)),
+    join(dirname(here), '..', '..', '..', 'spec', 'openapi.yaml'),
+  ].filter((x): x is string => !!x);
+  for (const file of candidates) {
+    try {
+      if (!existsSync(file)) continue;
+      const yamlText = readFileSync(file, 'utf8');
+      const json = YAML.parse(yamlText) as Record<string, unknown>;
+      if (json && typeof json === 'object' && json.openapi) return { json, yamlText, source: file };
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+/** 解析 swagger-ui-dist 静态资源目录。 */
+function resolveSwaggerUiDir(): string | null {
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg = require.resolve('swagger-ui-dist/package.json');
+    return dirname(pkg);
+  } catch { return null; }
 }

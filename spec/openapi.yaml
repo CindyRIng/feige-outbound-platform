@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: 飞鸽外呼本地平台（FOP）REST v1 API
-  version: 0.1.0
+  version: 0.3.0
   summary: REST v1 机器可读契约（35 个操作）
   description: |
     本文件是 `docs/05-对外API契约.md` 的机器可读副本（OpenAPI 3.1）；人类可读权威契约以

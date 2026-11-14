@@ -8,3 +8,5 @@ function copy(src, dst) {
 }
 copy('src/db/migrations', 'dist/src/db/migrations');
 copy('src/upstream/login-worker.mjs', 'dist/upstream/login-worker.mjs');
+copy('spec/openapi.yaml', 'dist/spec/openapi.yaml');
+copy('spec/README.md', 'dist/spec/README.md');

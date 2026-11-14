@@ -2,8 +2,23 @@
 
 > 本文是北向 REST 接口的**人类可读权威契约**；机器可读副本见 [../spec/openapi.yaml](../spec/openapi.yaml)（两者必须一致，冲突时以本文 + [01-决策与约定.md](./01-决策与约定.md) 为准）。
 >
-> 状态：v0.1（Step 2 设计稿，2026-11-14）｜Base URL：`http://127.0.0.1:8710/api/v1`
+> 状态：v0.2（2026-11-14；v0.3.0 增补运行时文档端点）｜Base URL：`http://127.0.0.1:8710/api/v1`
 > 通用约定（认证/封套/错误码/分页/时间/幂等/限流）见 [01-决策与约定.md](./01-决策与约定.md) §5；本文只定义**字段与行为**。
+
+---
+
+## 0. 运行时文档端点（v0.3.0）
+
+除业务接口外，服务运行时提供以下只读文档端点（**公开，无需 token**；服务默认仅监听 127.0.0.1）：
+
+| 端点 | 内容 |
+| --- | --- |
+| `GET /api/v1` | API 发现页（名称/版本/文档链接/健康检查链接） |
+| `GET /api/v1/openapi.json` | OpenAPI 3.1 契约 JSON（与 `spec/openapi.yaml` 同源；35 操作 / 26 路径 / 40 错误码） |
+| `GET /api/v1/openapi.yaml` | OpenAPI 契约 YAML 原文 |
+| `GET /api/v1/docs` | Swagger UI（离线静态资源；支持 `?token=<localApiToken>` 自动注入、Authorize 按钮） |
+
+> 业务接口仍需 `Authorization: Bearer <localApiToken>`；未带 token 的业务请求返回 `401 UNAUTHORIZED`。
 
 ---
 

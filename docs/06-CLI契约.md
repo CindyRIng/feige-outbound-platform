@@ -34,6 +34,8 @@
 ## 2. 安装与调用约定
 
 - 可执行名：`feige`（必须能在 `PATH` 中解析）；`feige --version` 可验证。
+- 安装：`npm install && npm run build && npm run install:cli`（默认安装到 `~/.local/bin/feige`，见 docs/15）。
+- 帮助：`feige --help`（顶层命令/全局选项）、`feige help <command>`（含子命令）、**`feige --help-all`（完整命令树，全部命令/子命令/参数/选项）**；完整参考见自动生成的 [16-CLI参考手册.md](./16-CLI参考手册.md)。
 - 平台侧依赖：`feige serve` 常驻服务已运行（systemd user service，见 [10-部署与运维.md](./10-部署与运维.md)）。
 - 身份：本地 API token 存于 `~/.config/feige-outbound/api-token`（0600，[01 §5.2](./01-决策与约定.md)），CLI 默认读取；也可用 `--token-file` 或环境变量指定。
 - 示例中的号码、账号、ID 均已**脱敏**；实际使用时传真实完整值。

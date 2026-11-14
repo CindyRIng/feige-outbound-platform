@@ -12,6 +12,7 @@ import type {
   UpstreamUserDetail,
 } from './types.js';
 import { AppError } from '../errors.js';
+import { VERSION } from '../version.js';
 import type { Logger } from '../logger.js';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -251,7 +252,7 @@ export function createUpstreamClient(opts: UpstreamClientOptions): UpstreamClien
     const perTimeout = ro.timeoutMs ?? timeoutMs;
     const timer = setTimeout(() => controller.abort(), Math.max(1, perTimeout));
     const url = buildUrl(baseUrl, path, ro.query);
-    const headers: Record<string, string> = { accept: 'application/json', 'user-agent': 'FOP/0.1.0' };
+    const headers: Record<string, string> = { accept: 'application/json', 'user-agent': `FOP/${VERSION}` };
     if (token) headers['cloud-token'] = token;
     let bodyText: string | undefined;
     if (ro.body !== undefined) {

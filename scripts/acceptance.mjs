@@ -40,6 +40,18 @@ async function main() {
   // 1) 鉴权
   const bad = await req('GET', '/status', undefined, { token: 'bad-token' });
   record('M5-AUTH', '错误 token 返回 401 UNAUTHORIZED', bad.status === 401 && bad.json?.error?.code === 'UNAUTHORIZED', `status=${bad.status} code=${bad.json?.error?.code}`);
+  // 1.5) 运行时 API 文档（OpenAPI + Swagger UI，公开端点）
+  const discoveryRes = await fetch(API + '', { signal: AbortSignal.timeout(10000) });
+  const discovery = await discoveryRes.json().catch(() => null);
+  record('M5-DISCOVERY', 'GET /api/v1（API 发现页，无需 token）', discoveryRes.status === 200 && discovery?.data?.docs === '/api/v1/docs', `status=${discoveryRes.status}`);
+  const openapiRes = await fetch(API + '/openapi.json', { signal: AbortSignal.timeout(10000) });
+  const openapi = await openapiRes.json().catch(() => null);
+  const opCount = openapi?.paths ? Object.values(openapi.paths).reduce((n, p) => n + Object.keys(p).filter(k => ['get', 'post', 'put', 'patch', 'delete'].includes(k)).length, 0) : 0;
+  record('M5-OPENAPI', 'OpenAPI 3.1 运行时发布（/openapi.json，35 操作）', openapiRes.status === 200 && String(openapi?.openapi ?? '').startsWith('3.') && opCount >= 35, `openapi=${openapi?.openapi} paths=${Object.keys(openapi?.paths ?? {}).length} ops=${opCount}`);
+  const docsRes = await fetch(API + '/docs', { signal: AbortSignal.timeout(10000) });
+  const docsHtml = await docsRes.text().catch(() => '');
+  const cssRes = await fetch(API + '/docs/swagger-ui.css', { signal: AbortSignal.timeout(10000) });
+  record('M5-SWAGGER', 'Swagger UI 页面与静态资源（/docs）', docsRes.status === 200 && docsHtml.includes('swagger-ui') && cssRes.status === 200, `html=${docsRes.status} css=${cssRes.status}`);
   // 2) status / db / accounts
   const st = await req('GET', '/status');
   const sd = st.json?.data ?? {};

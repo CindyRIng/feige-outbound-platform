@@ -1,7 +1,7 @@
 {
-  "ts": "2026-11-14T00:14:05.546Z",
+  "ts": "2026-11-14T00:31:13.671Z",
   "api": "http://127.0.0.1:8710/api/v1",
-  "pass": 22,
+  "pass": 25,
   "fail": 0,
   "warn": 0,
   "results": [
@@ -17,6 +17,27 @@
       "name": "错误 token 返回 401 UNAUTHORIZED",
       "ok": true,
       "detail": "status=401 code=UNAUTHORIZED",
+      "level": "error"
+    },
+    {
+      "id": "M5-DISCOVERY",
+      "name": "GET /api/v1（API 发现页，无需 token）",
+      "ok": true,
+      "detail": "status=200",
+      "level": "error"
+    },
+    {
+      "id": "M5-OPENAPI",
+      "name": "OpenAPI 3.1 运行时发布（/openapi.json，35 操作）",
+      "ok": true,
+      "detail": "openapi=3.1.0 paths=26 ops=35",
+      "level": "error"
+    },
+    {
+      "id": "M5-SWAGGER",
+      "name": "Swagger UI 页面与静态资源（/docs）",
+      "ok": true,
+      "detail": "html=200 css=200",
       "level": "error"
     },
     {
@@ -51,14 +72,14 @@
       "id": "M1-JWT",
       "name": "JWT 有效期 > 1 天",
       "ok": true,
-      "detail": "expiresInSec=583680",
+      "detail": "expiresInSec=582652",
       "level": "error"
     },
     {
       "id": "M2-SYNC",
       "name": "话单已同步（total>0）",
       "ok": true,
-      "detail": "total=4118",
+      "detail": "total=4111",
       "level": "error"
     },
     {
@@ -156,7 +177,7 @@
       "id": "M4-BACKFILL",
       "name": "全量回填进度（可观测）",
       "ok": true,
-      "detail": "{\"audio_ready\":1682,\"tr_ready\":1682,\"an_ready\":1667,\"total\":4119}",
+      "detail": "{\"audio_ready\":1682,\"tr_ready\":1682,\"an_ready\":1667,\"total\":4112}",
       "level": "error"
     }
   ]

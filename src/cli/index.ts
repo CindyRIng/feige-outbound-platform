@@ -250,9 +250,26 @@ function newLocalId(): string { return `req_cli_${Date.now().toString(36)}`; }
 export function buildProgram(state: CliState): Command {
   const program = new Command();
   program.name('feige').description('飞鸽外呼本地平台 CLI（REST 薄封装）').version(VERSION, '--version', '显示版本');
-  addCommonOptions(program).option('--no-color', '禁用颜色');
+  addCommonOptions(program).option('--no-color', '禁用颜色')
+    .option('--help-all', '显示全部命令与子命令的完整帮助（递归，含所有选项）');
+  program.addHelpText('after', '\n使用 `feige help <command>` 查看某个命令的子命令；\n使用 `feige --help-all` 查看完整命令树（所有命令与子命令、参数、选项）；\nREST API 运行时文档：http://127.0.0.1:8710/api/v1/docs');
   program.exitOverride();
   program.configureOutput({ writeErr: () => { /* 由 runCli 统一输出 */ } });
+
+  // ---- 常驻进程（serve/mcp 由 main.ts 直接路由；此处注册仅为帮助文档完整性）----
+  addCommonOptions(program.command('serve').description('启动本地服务（systemd 常驻；main.ts 直接路由）')
+    .option('--port <n>', '监听端口（默认 8710 / FOP_PORT）')
+    .option('--host <host>', '监听地址（默认 127.0.0.1 / FOP_HOST）'))
+    .action((...args: any[]) => {
+      const cmd = args[args.length - 1] as Command; void cmd;
+      writeLine('serve 由 `feige serve` 直接启动（不经过 CLI 解析）；端口/地址可用 --port/--host 或 FOP_PORT/FOP_HOST。');
+    });
+  addCommonOptions(program.command('mcp').description('启动 MCP stdio server（main.ts 直接路由；agent 集成入口）')
+    .option('--allow-write', '开放写工具（默认只读 18 个；开启后 32 个，写工具需 confirm:true）'))
+    .action((...args: any[]) => {
+      const cmd = args[args.length - 1] as Command; void cmd;
+      writeLine('MCP server 由 `feige mcp` 直接启动（stdio JSON-RPC）；工具列表见 `docs/07-MCP工具契约.md`。');
+    });
 
   // ---- 平台 ----
   addCommonOptions(program.command('health').description('存活探针（GET /health）'))
@@ -889,7 +906,48 @@ export function buildProgram(state: CliState): Command {
       process.stdout.write(script);
     });
 
+
   return program;
+}
+
+/**
+ * 递归渲染完整帮助（供 `feige --help-all`、CLI 参考文档生成脚本复用）。
+ * 输出：全局选项 + 所有命令/子命令/参数/命令级选项。全局选项对所有命令通用。
+ */
+export function renderAllHelp(program: Command): string {
+  const lines: string[] = [];
+  const pad = (n: number) => ' '.repeat(n);
+  const commonFlags = new Set<string>(['--api <url>', '--token <token>', '--token-file <path>', '-j, --json', '-q, --quiet', '-v, --verbose', '--timeout <dur>', '-y, --yes']);
+  const formatOpt = (o: any, indent: string): string => {
+    const flags = String(o.flags ?? '');
+    const desc = String(o.description ?? '');
+    const def = o.defaultValue !== undefined && o.defaultValue !== null ? `（默认 ${JSON.stringify(o.defaultValue)}）` : '';
+    return `${indent}${flags.padEnd(30)}${desc}${def}`;
+  };
+  lines.push(`${program.name()} v${VERSION} — ${program.description()}`);
+  lines.push('');
+  lines.push('Usage: feige [global options] <command> [subcommand] [options]');
+  lines.push('');
+  lines.push('全局选项（所有命令通用）:');
+  for (const o of program.options as any[]) lines.push(formatOpt(o, '  '));
+  lines.push('');
+  lines.push('命令树:');
+  const walk = (cmd: any, path: string, depth: number): void => {
+    const name = cmd.name();
+    if (name === 'help' || name === '--help') return;
+    const args = (cmd.registeredArguments ?? []).map((a: any) => (a.required ? `<${a.name()}>` : `[${a.name()}]`)).join(' ');
+    const usage = `${path}${args ? ' ' + args : ''}`;
+    const desc = cmd.description() ? ` — ${cmd.description()}` : '';
+    lines.push(`${pad(depth * 2)}${name}${desc}`);
+    lines.push(`${pad(depth * 2 + 2)}usage: feige ${usage} [options]`);
+    const own = (cmd.options as any[]).filter((o: any) => !commonFlags.has(String(o.flags)));
+    for (const o of own) lines.push(formatOpt(o, pad(depth * 2 + 2)));
+    for (const child of cmd.commands as any[]) walk(child, `${usage} ${child.name()}`, depth + 1);
+  };
+  for (const cmd of program.commands as any[]) walk(cmd, cmd.name(), 1);
+  lines.push('');
+  lines.push('说明：以上为完整命令树；每个命令也支持 `feige <command...> --help` 查看该级帮助。');
+  return lines.join('\n');
 }
 
 /** ---------------- 词表导入解析 ---------------- */
@@ -1074,7 +1132,7 @@ async function runDoctor(cmd: Command, state: CliState): Promise<void> {
 
 /** ---------------- completion ---------------- */
 function completionScript(shell: string): string | undefined {
-  const commands = ['health', 'status', 'version', 'config', 'account', 'dial', 'calls', 'sync', 'jobs', 'events', 'term', 'text', 'doctor', 'completion'];
+  const commands = ['serve', 'mcp', 'health', 'status', 'version', 'config', 'account', 'dial', 'calls', 'sync', 'jobs', 'events', 'term', 'text', 'doctor', 'completion'];
   const subs: Record<string, string[]> = {
     config: ['get', 'set'], account: ['list', 'show', 'add', 'update', 'remove', 'login', 'logout', 'health'],
     calls: ['list', 'get', 'detail', 'transcript', 'audio', 'reprocess', 'cancel', 'events'],
@@ -1113,6 +1171,7 @@ export async function runCli(argv: string[]): Promise<number> {
   process.on('SIGINT', onSigint);
   const program = buildProgram(state);
   try {
+    if (argv.includes('--help-all')) { writeLine(renderAllHelp(program)); return 0; }
     await program.parseAsync(argv.length ? argv : ['--help'], { from: 'user' });
     if (state.interrupted) return 130;
     return state.exitCode;

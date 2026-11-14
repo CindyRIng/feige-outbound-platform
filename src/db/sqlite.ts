@@ -21,7 +21,8 @@ import type {
 import { CALL_STATUSES, JOB_STATUSES, JOB_TYPES, STAGE_STATUSES, EVENT_TYPES, TERM_CATEGORIES } from '../types/common.js';
 import { AppError } from '../errors.js';
 
-const APP_VERSION = '0.1.0';
+import { VERSION } from '../version.js';
+const APP_VERSION = VERSION;
 const EPOCH_ISO = '1970-01-01T00:00:00.000Z';
 const SQLITE_APP_ID = 0x464f5001; // "FOP"+1（docs/04 §4.5）
 const AUDIT_ACTORS = ['local-api', 'cli', 'mcp', 'scheduler', 'system'] as const;

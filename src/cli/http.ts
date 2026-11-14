@@ -4,7 +4,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-export const VERSION = '0.1.0';
+import { VERSION } from '../version.js';
+export { VERSION };
 export const DEFAULT_API = 'http://127.0.0.1:8710/api/v1';
 export const MCP_SERVER_NAME = 'feige-outbound';
 

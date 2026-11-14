@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: build & test (Node 22)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ["22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Unit tests (93)
+        run: node --test dist/tests/*.test.js
+      - name: Docs generation check
+        run: |
+          node scripts/gen-cli-docs.mjs
+          git diff --exit-code docs/16-CLI参考手册.md
+      - name: CLI help sanity
+        run: |
+          node dist/src/main.js --help-all | grep -q "feige account add"
+          node dist/src/main.js --version

@@ -26,6 +26,8 @@ exploration/**/*.jsonl
 exploration/**/storage-state*.json
 exploration/**/cookies*.json
 *.png
+!docs/assets/**/*.png
+!docs/assets/*.png
 .playwright-mcp/
 
 # 日志

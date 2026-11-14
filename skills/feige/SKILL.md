@@ -6,10 +6,12 @@ description: >
   「平台/账号现在能不能拨」「全量回补分析历史通话」等请求时使用。
   前置：本机 feige 平台服务已运行（feige health 通过）、目标账号已登录；
   转写/分析依赖平台已配置 MiniMax ASR 与 DeepSeek（feige doctor --probe-providers 检查）。
-version: 0.1.0
+version: 0.3.0
 ---
 
 # 飞鸽外呼（feige）
+
+> 安装：`npm run install:cli`（`feige` 命令）；完整命令见 `feige --help-all` 与 [docs/16-CLI参考手册.md](../../docs/16-CLI参考手册.md)。服务端 REST 文档：`http://127.0.0.1:8710/api/v1/docs`。
 
 本地平台把飞鸽外呼封装为可编程能力：**CLI `feige ...`** 与 **MCP server `feige-outbound`** 都是本地 REST 的薄封装。
 v1 关键事实：**转写全部由平台自建 ASR（MiniMax `asr-1.0`）生成，不使用上游转写**；AI 后处理是**平台内置 DeepSeek**（默认 `deepseek-chat`，失败升级 `deepseek-v4-pro`）。呼出是真实外呼（回拨模式，先振铃坐席手机，需人工接听）。

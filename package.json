@@ -1,6 +1,6 @@
 {
   "name": "feige-outbound-platform",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -19,7 +19,10 @@
     "acceptance": "node scripts/acceptance.mjs",
     "reconcile": "node scripts/reconcile.mjs",
     "mcp:smoke": "node scripts/mcp-smoke.mjs",
-    "live-dial": "node scripts/live-dial.mjs"
+    "live-dial": "node scripts/live-dial.mjs",
+    "install:cli": "bash scripts/install-cli.sh",
+    "docs:cli": "node scripts/gen-cli-docs.mjs",
+    "docs": "npm run build && npm run docs:cli"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
@@ -27,11 +30,46 @@
     "commander": "^15.1.0",
     "fastify": "^5.12.8",
     "playwright-core": "^1.65.0",
+    "swagger-ui-dist": "^5.35.0",
+    "yaml": "^2.9.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "typescript": "^5.9.3"
   },
-  "exports": "./dist/src/main.js"
+  "exports": "./dist/src/main.js",
+  "license": "MIT",
+  "description": "飞鸽外呼本地平台（FOP）：REST/CLI/MCP/SKILL + 本地 ASR + AI 后处理 + 呼出编排",
+  "keywords": [
+    "feige",
+    "outbound-call",
+    "call-center",
+    "asr",
+    "minimax",
+    "deepseek",
+    "crm",
+    "mcp",
+    "cli",
+    "sqlite",
+    "openapi"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CindyRIng/feige-outbound-platform.git"
+  },
+  "homepage": "https://github.com/CindyRIng/feige-outbound-platform#readme",
+  "bugs": {
+    "url": "https://github.com/CindyRIng/feige-outbound-platform/issues"
+  },
+  "files": [
+    "dist/",
+    "spec/",
+    "docs/",
+    "skills/",
+    "deploy/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ]
 }
