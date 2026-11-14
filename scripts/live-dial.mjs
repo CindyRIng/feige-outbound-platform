@@ -76,7 +76,22 @@ async function pollDial(callId) {
       timeline.push({ at: now(), status: c.status, reason: c.statusReason ?? null, upstream: c.upstreamStatus ?? null });
       log(`状态：${c.status}${c.statusReason ? '（' + c.statusReason + '）' : ''}${c.durationSec ? `，时长 ${c.durationSec}s` : ''}`);
     }
-    if (['ended', 'no_answer', 'failed', 'canceled'].includes(c.status)) return { call: c, timeline };
+    if (['ended', 'no_answer', 'failed', 'canceled'].includes(c.status)) {
+      // 状态可能被上游延迟修正（no_answer → ended/connected）：给 90s 宽限期继续观察
+      const grace = Date.now() + 90000;
+      while (Date.now() < grace) {
+        await sleep(3000);
+        const r2 = await req('GET', `/calls/${callId}`);
+        const c2 = r2.json?.data;
+        if (!c2) continue;
+        if (c2.status !== c.status) {
+          timeline.push({ at: now(), status: c2.status, reason: c2.statusReason ?? null, upstream: c2.upstreamStatus ?? null, corrected: true });
+          log(`状态修正：${c2.status}（时长 ${c2.durationSec ?? 0}s）`);
+          if (['ended', 'failed', 'canceled'].includes(c2.status) || (c2.status === 'connected')) return { call: c2, timeline, corrected: true };
+        }
+      }
+      return { call: (await req('GET', `/calls/${callId}`)).json?.data ?? c, timeline };
+    }
     await sleep(2000);
   }
   return { call: (await req('GET', `/calls/${callId}`)).json?.data, timeline };
@@ -101,7 +116,8 @@ async function main() {
     log(`已受理 callId=${callId}，等待状态流转…`);
     const { call, timeline } = await pollDial(callId);
     log(`终态：${call?.status}（${call?.statusReason ?? ''}）`);
-    const detail = await waitPipeline(callId, PIPE_TIMEOUT_SEC);
+    // 未接通/被拒时不做长时间流水线等待（无录音可处理）
+    const detail = call?.status === 'ended' ? await waitPipeline(callId, PIPE_TIMEOUT_SEC) : null;
     const tr = detail?.transcript?.available ? await req('GET', `/calls/${callId}/transcript`) : null;
     const evidenceAttempt = {
       attempt, callId, createdAt: created.json?.data?.createdAt, timeline, finalStatus: call?.status, finalReason: call?.statusReason ?? null,
@@ -112,7 +128,11 @@ async function main() {
     };
     evidence.attempts.push(evidenceAttempt);
     if (call?.status === 'ended' && detail?.pipeline?.transcript !== 'missing') { final = evidenceAttempt; break; }
-    if (attempt < RETRIES) { log(`未接通/未完成，60s 后重试（最多 ${RETRIES} 次）`); await sleep(60000); }
+    const reason = String(call?.statusReason ?? '');
+    if (/当前时间段无法调用|线路级|CALL_OUTSIDE_DIAL_WINDOW/.test(reason) || (call?.status === 'failed' && /电信回拨\(2516\)/.test(reason))) {
+      log('线路级时段限制（2516）：本次未产生真实呼叫，稍后重试');
+    }
+    if (attempt < RETRIES) { log(`未接通/未完成，90s 后重试（最多 ${RETRIES} 次）`); await sleep(90000); }
   }
   evidence.final = final;
   evidence.pass = !!final && final.pipeline?.audio === 'ready' && final.pipeline?.transcript === 'ready' && ['ready', 'skipped'].includes(final.pipeline?.analysis);

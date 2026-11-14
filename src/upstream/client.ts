@@ -114,6 +114,13 @@ function unwrapEnvelope<T>(envelope: unknown, ctx: { path: string; httpStatus: n
       details: { path: ctx.path, httpStatus: ctx.httpStatus, upstreamCode: code },
     });
   }
+  // 电信回拨线路级时段限制（实测 2516）：全局 UI 时段 07:50–22:00 之外，线路还可能有更严格时段
+  if (code === 2516 || /当前时间段无法调用/.test(message)) {
+    throw upstreamError('CALL_OUTSIDE_DIAL_WINDOW', message || '当前时间段无法调用（线路级时段限制）', {
+      retryable: true,
+      details: { path: ctx.path, httpStatus: ctx.httpStatus, upstreamCode: code, upstreamMessage: message.slice(0, 200), reason: 'line_time_restricted' },
+    });
+  }
   if (code === 10056) {
     if (DIAL_WINDOW_RE.test(message)) {
       throw upstreamError('CALL_OUTSIDE_DIAL_WINDOW', message || '当前不在可拨号时段（07:50–22:00）', {

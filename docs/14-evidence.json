@@ -1,5 +1,5 @@
 {
-  "ts": "2026-11-13T18:41:27.525Z",
+  "ts": "2026-11-14T00:14:05.546Z",
   "api": "http://127.0.0.1:8710/api/v1",
   "pass": 22,
   "fail": 0,
@@ -30,7 +30,7 @@
       "id": "M1-DIALWIN",
       "name": "拨打时段计算",
       "ok": true,
-      "detail": "{\"open\":false,\"windowStart\":\"07:50\",\"windowEnd\":\"22:00\",\"timezone\":\"Asia/Shanghai\",\"nextOpenAt\":\"2026-11-13T23:50:00.000Z\"}",
+      "detail": "{\"open\":true,\"windowStart\":\"07:50\",\"windowEnd\":\"22:00\",\"timezone\":\"Asia/Shanghai\",\"nextOpenAt\":null}",
       "level": "error"
     },
     {
@@ -51,14 +51,14 @@
       "id": "M1-JWT",
       "name": "JWT 有效期 > 1 天",
       "ok": true,
-      "detail": "expiresInSec=603639",
+      "detail": "expiresInSec=583680",
       "level": "error"
     },
     {
       "id": "M2-SYNC",
       "name": "话单已同步（total>0）",
       "ok": true,
-      "detail": "total=4107",
+      "detail": "total=4118",
       "level": "error"
     },
     {
@@ -119,16 +119,16 @@
     },
     {
       "id": "M3-WINDOW",
-      "name": "时段外受理为 pending（scheduleOutsideWindow=true）",
+      "name": "预约呼出受理为 pending（24h 后，不触发真实呼出）",
       "ok": true,
-      "detail": "status=pending reason=等待拨打时段",
+      "detail": "status=pending reason=等待调度",
       "level": "error"
     },
     {
       "id": "M3-CANCEL",
-      "name": "pending 呼出可取消（204/200）",
+      "name": "pending 呼出可取消且状态变为 canceled",
       "ok": true,
-      "detail": "canceled",
+      "detail": "cancelHttp=200 status=canceled",
       "level": "error"
     },
     {
@@ -156,7 +156,7 @@
       "id": "M4-BACKFILL",
       "name": "全量回填进度（可观测）",
       "ok": true,
-      "detail": "{\"audio_ready\":1681,\"tr_ready\":1681,\"an_ready\":1667,\"total\":4108}",
+      "detail": "{\"audio_ready\":1682,\"tr_ready\":1682,\"an_ready\":1667,\"total\":4119}",
       "level": "error"
     }
   ]

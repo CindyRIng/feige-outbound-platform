@@ -108,6 +108,6 @@
 - ✅ M2：话单全量同步（4105 条真实入库）、录音归档（实测 **8kHz/2bit/2ch A/B**）、**双声道拆分 ASR**（MiniMax，真实调用）、事件/SSE；
 - ✅ M4：DeepSeek 内置后处理（`analysis-v1` prompt + JSON schema + 降级链）、词表归一、全量回填；
 - ✅ M5：CLI（40 命令节点）、MCP（18 只读/32 写工具）、SKILL 包、**systemd user service 已安装运行**、93/93 测试、验收脚本；
-- ⏳ M3 真实拨测：受飞鸽拨打时段（07:50–22:00）限制，当前为凌晨；已定时 07:50 自动执行真实呼出验收并补入报告。
+- ✅ M3 真实拨测（2026-11-14 08:00–08:07）：真实呼出受理→接通→录音归档→ASR 流水线通过（用户确认口径：验证到接通/录音即可）；线路级时段 2516 已归一并记录（见 docs/00 §8.1）。
 
 **运行**：`systemctl --user status feige-outbound`（active）；REST `http://127.0.0.1:8710/api/v1`；验收 `node scripts/acceptance.mjs`。

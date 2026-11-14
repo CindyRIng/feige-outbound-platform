@@ -1,0 +1,89 @@
+{
+  "ts": "2026-11-14T00:12:39.114Z",
+  "note": "M3 真实拨测验收证据（用户确认：验证到接通/录音即可，不再消耗剩余次数）",
+  "upstreamDialWindowObservation": {
+    "globalUI": "07:50-22:00",
+    "lineLevelRestriction": "07:52 实测 2516 当前时间段无法调用，08:00 起放行（线路级时段更严）"
+  },
+  "calls": [
+    {
+      "callId": "call_01M7BNPVCTJFM7CSA01WGTM702",
+      "status": "no_answer",
+      "telA": "156****0075",
+      "telB": "133****2072",
+      "upstreamCallId": "2121392910112043009",
+      "createdAt": "2026-11-14T00:00:55.706Z",
+      "submittedAt": "2026-11-14T00:00:57.631Z",
+      "dialedAt": "2026-11-14T00:00:57.631Z",
+      "answeredAt": null,
+      "endedAt": "2026-11-14T00:01:03.587Z",
+      "durationSec": 0,
+      "callStatus": 2,
+      "callStatusName": "未接通",
+      "finishStatusName": "其他",
+      "reason": "已提交上游，等待坐席接听",
+      "audio": "missing",
+      "transcript": "missing",
+      "analysis": "skipped",
+      "audioAsset": null,
+      "transcriptRow": null,
+      "analysisRow": null
+    },
+    {
+      "callId": "call_01M7BNRXW5DVZH2CBAZC77ZER7",
+      "status": "ended",
+      "telA": "156****0075",
+      "telB": "133****2072",
+      "upstreamCallId": "2121393195450552322",
+      "createdAt": "2026-11-14T00:02:03.781Z",
+      "submittedAt": "2026-11-14T00:02:05.676Z",
+      "dialedAt": "2026-11-14T00:02:05.676Z",
+      "answeredAt": "2026-11-14T00:02:10.000Z",
+      "endedAt": "2026-11-14T00:02:13.000Z",
+      "durationSec": 3,
+      "callStatus": 1,
+      "callStatusName": "已接通",
+      "finishStatusName": "其他",
+      "reason": "已提交上游，等待坐席接听",
+      "audio": "ready",
+      "transcript": "ready",
+      "analysis": "skipped",
+      "audioAsset": {
+        "storagePath": "audio/2026/11/14/call_01M7BNRXW5DVZH2CBAZC77ZER7.wav",
+        "sizeBytes": 95404,
+        "sampleRateHza": 8000,
+        "channels": 2,
+        "durationMs": 2980
+      },
+      "transcriptRow": {
+        "source": "asr",
+        "provider": "minimax:asr-1.0",
+        "fullText": ""
+      },
+      "analysisRow": null
+    },
+    {
+      "callId": "call_01M7BP2FGZBHV42ZKCHQES0HQM",
+      "status": "no_answer",
+      "telA": "156****0075",
+      "telB": "133****2072",
+      "upstreamCallId": "2121394501397430274",
+      "createdAt": "2026-11-14T00:07:16.767Z",
+      "submittedAt": "2026-11-14T00:07:17.054Z",
+      "dialedAt": "2026-11-14T00:07:17.054Z",
+      "answeredAt": null,
+      "endedAt": "2026-11-14T00:07:21.068Z",
+      "durationSec": 0,
+      "callStatus": 2,
+      "callStatusName": "未接通",
+      "finishStatusName": "其他",
+      "reason": "已提交上游，等待坐席接听",
+      "audio": "missing",
+      "transcript": "missing",
+      "analysis": "skipped",
+      "audioAsset": null,
+      "transcriptRow": null,
+      "analysisRow": null
+    }
+  ]
+}

@@ -103,7 +103,7 @@ export class CallsService {
       if (['ended', 'no_answer', 'failed', 'canceled'].includes(c.status)) throw new AppError('CALL_ALREADY_TERMINAL', '话单已终态，不能取消');
       throw new AppError('CALL_NOT_CANCELABLE', '已提交上游，不能取消');
     }
-    const updated = await this.d.repo.updateCall(callId, { status: 'canceled', canceledAt: new Date().toISOString(), statusReason: '用户取消', updatedAt: new Date().toISOString() }, c.version);
+    const updated = await this.d.repo.updateCall(callId, { status: 'canceled', canceledAt: new Date().toISOString(), statusReason: '用户取消', updatedAt: new Date().toISOString() }, null);
     await this.d.events.emit({ type: 'call.canceled', accountId: c.accountId, callId, data: { callId } });
     await this.audit('call.cancel', 'call', callId, 'success');
     return this.toSummary(updated as Call);
@@ -243,7 +243,7 @@ export class CallsService {
     const client = this.d.accounts.client(c.accountId, token);
     // 号码查重（不阻断，仅 warning）
     try { await client.getExistOther(c.toPhone); } catch { /* ignore */ }
-    await this.d.repo.updateCall(c.callId, { dialState: 'sending', statusReason: '提交上游中', updatedAt: new Date().toISOString() }, c.version);
+    await this.d.repo.updateCall(c.callId, { dialState: 'sending', statusReason: '提交上游中', updatedAt: new Date().toISOString() }, null);
     const submittedAt = new Date();
     try {
       await client.dialCall({ telB: c.toPhone, interfaceId });
@@ -251,20 +251,22 @@ export class CallsService {
       const err = e as Error & { code?: string; retryAfter?: string };
       if (err.code === 'CALL_OUTSIDE_DIAL_WINDOW' && this.d.config.get().dial.scheduleOutsideWindow) {
         const dw = dialWindow(this.d.config.get());
-        await this.d.repo.updateCall(c.callId, { status: 'pending', scheduledAt: dw.nextOpenAt ?? null, statusReason: '等待拨打时段', dialState: 'none' }, c.version);
+        // 线路级时段限制可能比全局窗口更严（retryAfter 未知）→ 10 分钟后重试，避免抢占/空转
+        const retryAt = (err as { retryAfter?: string }).retryAfter ?? dw.nextOpenAt ?? new Date(Date.now() + 10 * 60 * 1000).toISOString();
+        await this.d.repo.updateCall(c.callId, { status: 'pending', scheduledAt: retryAt, statusReason: '等待拨打时段（线路级限制）', dialState: 'none' }, null);
         return;
       }
       await this.fail(c, err.code ?? 'CALL_REJECTED_BY_UPSTREAM', err.message);
       return;
     }
-    const updated = await this.d.repo.updateCall(c.callId, { status: 'dialing', dialState: 'sent', submittedAt: submittedAt.toISOString(), dialedAt: submittedAt.toISOString(), statusReason: '已提交上游，等待坐席接听', updatedAt: new Date().toISOString() }, c.version);
+    const updated = await this.d.repo.updateCall(c.callId, { status: 'dialing', dialState: 'sent', submittedAt: submittedAt.toISOString(), dialedAt: submittedAt.toISOString(), statusReason: '已提交上游，等待坐席接听', updatedAt: new Date().toISOString() }, null);
     this.d.accounts.markBusy(c.accountId, c.callId);
     await this.d.events.emit({ type: 'call.dialing', accountId: c.accountId, callId: c.callId, data: { callId: c.callId, submittedAt: submittedAt.toISOString() } });
     await this.audit('call.dial', 'call', c.callId, 'success');
     void updated;
   }
   private async fail(c: Call, code: string, message: string): Promise<void> {
-    await this.d.repo.updateCall(c.callId, { status: 'failed', failedReason: message, errorCode: code, statusReason: message, dialState: 'failed', updatedAt: new Date().toISOString() } as any, c.version);
+    await this.d.repo.updateCall(c.callId, { status: 'failed', failedReason: message, errorCode: code, statusReason: message, dialState: 'failed', updatedAt: new Date().toISOString() } as any, null);
     await this.d.events.emit({ type: 'call.failed', accountId: c.accountId, callId: c.callId, data: { callId: c.callId, errorCode: code, errorMessage: message } });
   }
   private async trackDialing(): Promise<void> {
@@ -274,7 +276,7 @@ export class CallsService {
       const submitted = c.submittedAt ? new Date(c.submittedAt).getTime() : now;
       if (now - submitted > 120000) {
         this.d.accounts.markBusy(c.accountId, null);
-        await this.d.repo.updateCall(c.callId, { status: 'failed', failedReason: '跟踪超时，未在上游查到话单（需人工核对）', errorCode: 'CALL_TRACKING_TIMEOUT', updatedAt: new Date().toISOString() } as any, c.version);
+        await this.d.repo.updateCall(c.callId, { status: 'failed', failedReason: '跟踪超时，未在上游查到话单（需人工核对）', errorCode: 'CALL_TRACKING_TIMEOUT', updatedAt: new Date().toISOString() } as any, null);
         await this.d.events.emit({ type: 'call.failed', accountId: c.accountId, callId: c.callId, data: { callId: c.callId, errorCode: 'CALL_TRACKING_TIMEOUT' } });
         continue;
       }

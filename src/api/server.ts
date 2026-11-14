@@ -13,6 +13,13 @@ export interface CreateServerOptions { services: Services; }
 export async function createServer(s: Services): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024, trustProxy: false });
   app.decorateRequest('requestId', '');
+  // 容忍空 JSON body（如无 body 的 POST /cancel、/logout）：空 → undefined，非空严格解析
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    const raw = String(body ?? '').trim();
+    if (raw === '') { done(null, undefined); return; }
+    try { done(null, JSON.parse(raw)); } catch (e) { done(e as Error, undefined); }
+  });
   app.addHook('onRequest', async (req, reply) => {
     const rid = (req.headers['x-request-id'] as string) || newRequestId();
     (req as any).requestId = rid;

@@ -23,7 +23,7 @@ let fatal = false;
 function record(id, name, ok, detail, level = 'error') { results.push({ id, name, ok, detail, level }); }
 async function req(method, path, body, opts = {}) {
   const res = await fetch(API + path, {
-    method, headers: { 'authorization': `Bearer ${opts.token ?? TOKEN}`, 'content-type': 'application/json', ...(opts.headers ?? {}) },
+    method, headers: { 'authorization': `Bearer ${opts.token ?? TOKEN}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(opts.headers ?? {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(opts.timeout ?? 30000),
   });
@@ -57,12 +57,19 @@ async function main() {
   const calls = await req('GET', '/calls?size=5');
   const total = calls.json?.meta?.pagination?.total ?? 0;
   record('M2-SYNC', '话单已同步（total>0）', total > 0, `total=${total}`);
-  // 5) 转写样例
-  const trList = await req('GET', '/calls?size=5&hasTranscript=true&status=ended');
-  const trCall = (trList.json?.data ?? [])[0];
+  // 5) 转写样例：取有实际语音分段的通话（避免选中 0 段/静音样本）
+  let trCall = null; let tr = null; let td = {};
+  for (const c of (await req('GET', '/calls?size=20&hasTranscript=true&status=ended')).json?.data ?? []) {
+    const r = await req('GET', `/calls/${c.callId}/transcript`);
+    const d = r.json?.data ?? {};
+    if ((d.segments?.length ?? 0) > 0) { trCall = c; tr = r; td = d; break; }
+  }
+  if (!trCall) {
+    const trList = await req('GET', '/calls?size=5&hasTranscript=true&status=ended');
+    trCall = (trList.json?.data ?? [])[0];
+    if (trCall) { tr = await req('GET', `/calls/${trCall.callId}/transcript`); td = tr.json?.data ?? {}; }
+  }
   if (trCall) {
-    const tr = await req('GET', `/calls/${trCall.callId}/transcript`);
-    const td = tr.json?.data ?? {};
     const roles = new Set((td.segments ?? []).map(s => s.role));
     record('M4-TRANSCRIPT', '转写样例（source=asr/分段/说话人角色）',
       tr.status === 200 && td.source === 'asr' && (td.segments?.length ?? 0) > 0 && (roles.has('agent') || roles.has('customer')),
@@ -86,14 +93,19 @@ async function main() {
   // 7) 词表归一工具
   const nz = await req('POST', '/text/normalize', { text: '复萌和福梦的系统' });
   record('M4-TERMS', 'POST /text/normalize（复萌/福梦→孚盟）', nz.status === 200 && (nz.json?.data?.normalized ?? '').includes('孚盟'), (nz.json?.data?.normalized ?? '').slice(0, 40));
-  // 8) 呼出受理与时段语义（不产生真实外呼：仅 dry-run + 时段外 pending 校验）
-  const dry = await req('POST', '/calls', { to: '13300000000', accountId: acct?.accountId, dryRun: true });
+  // 8) 呼出受理与时段语义（不产生真实外呼：仅 dry-run + 预约 pending 校验）
+  // 每次验收使用唯一测试号码，避免冷却期/幂等冲突（预约 24h 后，绝不会被调度真实呼出）
+  const testPhone = '133' + String(Date.now()).slice(-8);
+  const dry = await req('POST', '/calls', { to: testPhone, accountId: acct?.accountId, dryRun: true });
   record('M3-DRYRUN', 'POST /calls dryRun', dry.status === 200 && dry.json?.data?.dryRun === true, `willDial=${dry.json?.data?.willDial}`);
-  const sched = await req('POST', '/calls', { to: '13300000000', accountId: acct?.accountId, customerName: '验收测试' });
+  // 安全：scheduledAt 设为 24h 后，确保任何时段都不会被调度真实呼出；随后立即取消并校验
+  const future = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  const sched = await req('POST', '/calls', { to: testPhone, accountId: acct?.accountId, customerName: '验收测试', scheduledAt: future });
   const schedCall = sched.json?.data;
-  record('M3-WINDOW', '时段外受理为 pending（scheduleOutsideWindow=true）', sched.status === 201 && schedCall?.status === 'pending', `status=${schedCall?.status} reason=${schedCall?.statusReason}`);
-  if (schedCall?.callId) await req('POST', `/calls/${schedCall.callId}/cancel`);
-  record('M3-CANCEL', 'pending 呼出可取消（204/200）', true, 'canceled');
+  record('M3-WINDOW', '预约呼出受理为 pending（24h 后，不触发真实呼出）', sched.status === 201 && schedCall?.status === 'pending', `status=${schedCall?.status} reason=${schedCall?.statusReason}`);
+  const canceled = schedCall?.callId ? await req('POST', `/calls/${schedCall.callId}/cancel`) : null;
+  const after = schedCall?.callId ? await req('GET', `/calls/${schedCall.callId}`) : null;
+  record('M3-CANCEL', 'pending 呼出可取消且状态变为 canceled', canceled?.status === 200 && after?.json?.data?.status === 'canceled', `cancelHttp=${canceled?.status} status=${after?.json?.data?.status}`);
   // 9) 任务/事件可观测
   const jobs = await req('GET', '/jobs?size=3');
   record('M5-JOBS', 'GET /jobs', jobs.status === 200 && Array.isArray(jobs.json?.data), `count=${(jobs.json?.data ?? []).length}`);

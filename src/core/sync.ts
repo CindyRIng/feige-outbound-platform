@@ -198,8 +198,13 @@ export class SyncService {
       if (isEnded) {
         if (!rec.preRecordUrl) {
           if (['pending', 'in_progress'].includes(call.audioStatus)) { patch.audioStatus = 'missing'; patch.transcriptStatus = 'missing'; patch.analysisStatus = 'skipped'; changed = true; }
+        } else if (['pending', 'missing', 'failed'].includes(call.audioStatus)) {
+          // 录音可能在上游延迟生成（实测：通话结束后 preRecordUrl 稍后才出现）→ 允许 missing/failed 回补为 pending
+          patch.audioStatus = 'pending';
+          if (call.transcriptStatus !== 'ready') patch.transcriptStatus = 'pending';
+          if (call.analysisStatus !== 'ready') patch.analysisStatus = 'pending';
+          changed = true;
         }
-        else if (call.audioStatus === 'pending') { /* pipeline 由 full/backfill 阶段统一入队，避免 incremental 重复灌入 */ }
       }
       const updated = await this.d.repo.updateCall(call.callId, patch, call.version);
       const c2 = updated ?? { ...call, ...patch } as Call;
