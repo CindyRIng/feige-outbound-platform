@@ -1,5 +1,5 @@
 {
-  "ts": "2026-11-14T07:18:21.749Z",
+  "ts": "2026-11-20T02:32:15.507Z",
   "api": "http://127.0.0.1:8710/api/v1",
   "pass": 27,
   "fail": 0,
@@ -44,7 +44,7 @@
       "id": "M5-PII",
       "name": "手机号展示策略（security.maskPhones=false）",
       "ok": true,
-      "detail": "phone=13340685759 mode=full",
+      "detail": "phone=13341891687 mode=full",
       "level": "error"
     },
     {
@@ -77,16 +77,16 @@
     },
     {
       "id": "M1-JWT",
-      "name": "JWT 有效期 > 1 天",
+      "name": "JWT 有效（>1 小时）",
       "ok": true,
-      "detail": "expiresInSec=558224",
+      "detail": "valid=true expiresInSec=56992",
       "level": "error"
     },
     {
       "id": "M2-SYNC",
       "name": "话单已同步（total>0）",
       "ok": true,
-      "detail": "total=4119",
+      "detail": "total=4739",
       "level": "error"
     },
     {
@@ -100,14 +100,14 @@
       "id": "M4-CHANNEL",
       "name": "双声道拆分（segment.channel 0/1 存在）",
       "ok": true,
-      "detail": "channels=1,0",
+      "detail": "channels=0,1",
       "level": "error"
     },
     {
       "id": "M2-AUDIO",
       "name": "录音归档（8k/2ch WAV）",
       "ok": true,
-      "detail": "sampleRate=8000 channels=2 size=332204",
+      "detail": "sampleRate=8000 channels=2 size=293164",
       "level": "error"
     },
     {
@@ -191,7 +191,7 @@
       "id": "M4-BACKFILL",
       "name": "全量回填进度（可观测）",
       "ok": true,
-      "detail": "{\"audio_ready\":1683,\"tr_ready\":1683,\"an_ready\":1668,\"total\":4120}",
+      "detail": "{\"audio_ready\":1863,\"tr_ready\":1863,\"an_ready\":1847,\"total\":4740}",
       "level": "error"
     }
   ]

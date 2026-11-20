@@ -1,6 +1,6 @@
 # 16 CLI 参考手册（`feige`）
 
-> 版本：v0.3.2｜自动生成：`npm run docs:cli`（来源：CLI 命令树；与 `feige --help-all` 一致）
+> 版本：v0.3.3｜自动生成：`npm run docs:cli`（来源：CLI 命令树；与 `feige --help-all` 一致）
 
 `feige` 是 REST v1 的薄封装：所有命令通过 HTTP 调用本地服务（默认 `http://127.0.0.1:8710/api/v1`），不直接访问数据库或上游。
 

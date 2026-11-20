@@ -264,7 +264,7 @@ test('accounts：CRUD、软删除、唯一键释放、会话字段映射', async
     await assert.rejects(() => ctx.repo.removeAccount('nope'), (e: unknown) => e instanceof AppError && e.code === 'ACCOUNT_NOT_FOUND');
 
     // 有历史话单时禁止硬删除（FK RESTRICT）
-    await ctx.repo.insertCall(mkCall({ callId: 'call_01J8Z3K5T9QW2M4R7X1C6V0B8B', accountId: 'main3' }));
+    await ctx.repo.insertCall(mkCall({ callId: 'call_01J8Z3K5T9QW2M4R7X1C6V0B8B', accountId: 'main3', startedAt: new Date().toISOString() }));
     await assert.rejects(() => ctx.repo.hardDeleteAccount('main3'), (e: unknown) => e instanceof AppError && e.code === 'VALIDATION_FAILED');
 
     const stats = await ctx.repo.accountStats('main3');
@@ -643,7 +643,7 @@ test('jobs：claimJob 租约、recoverExpiredJobs、更新与统计', async () =
 
     // 失败 + lastErrorJson → last_error_code/message
     const failed = await ctx.repo.updateJob(j2.jobId, {
-      status: 'failed', finishedAt: iso(-10),
+      status: 'failed', finishedAt: new Date().toISOString(),
       lastErrorJson: JSON.stringify({ code: 'ANALYSIS_FAILED', message: 'JSON 不合法' }),
     });
     assert.equal(failed!.lastErrorCode, 'ANALYSIS_FAILED');

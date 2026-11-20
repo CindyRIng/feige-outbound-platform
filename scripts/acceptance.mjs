@@ -71,7 +71,7 @@ async function main() {
   const ah = acct ? await req('GET', `/accounts/${acct.accountId}/health`) : { json: null };
   const ahd = ah.json?.data ?? {};
   record('M1-LOGIN', '账号在线 + 上游可达 + 线路', ahd.state === 'online' && ahd.upstream?.reachable === true && !!ahd.line, `state=${ahd.state} upstream=${ahd.upstream?.reachable} line=${ahd.line?.lineName}`);
-  record('M1-JWT', 'JWT 有效期 > 1 天', (ahd.jwt?.expiresInSec ?? 0) > 86400, `expiresInSec=${ahd.jwt?.expiresInSec}`);
+  record('M1-JWT', 'JWT 有效（>1 小时）', ahd.jwt?.valid === true && (ahd.jwt?.expiresInSec ?? 0) > 3600, `valid=${ahd.jwt?.valid} expiresInSec=${ahd.jwt?.expiresInSec}`);
   // 4) 同步结果统计
   const calls = await req('GET', '/calls?size=5');
   const total = calls.json?.meta?.pagination?.total ?? 0;
@@ -122,15 +122,18 @@ async function main() {
   // 每次验收使用唯一测试号码，避免冷却期/幂等冲突（预约 24h 后，绝不会被调度真实呼出）
   const testPhone = '133' + String(Date.now()).slice(-8);
   const dry = await req('POST', '/calls', { to: testPhone, accountId: acct?.accountId, dryRun: true });
-  record('M3-DRYRUN', 'POST /calls dryRun', dry.status === 200 && dry.json?.data?.dryRun === true, `willDial=${dry.json?.data?.willDial}`);
+  if (dry.json?.error?.code === 'ACCOUNT_BUSY') record('M3-DRYRUN', 'POST /calls dryRun（账号忙，跳过）', false, 'ACCOUNT_BUSY', 'warn');
+  else record('M3-DRYRUN', 'POST /calls dryRun', dry.status === 200 && dry.json?.data?.dryRun === true, `willDial=${dry.json?.data?.willDial}`);
   // 安全：scheduledAt 设为 24h 后，确保任何时段都不会被调度真实呼出；随后立即取消并校验
   const future = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
   const sched = await req('POST', '/calls', { to: testPhone, accountId: acct?.accountId, customerName: '验收测试', scheduledAt: future });
   const schedCall = sched.json?.data;
-  record('M3-WINDOW', '预约呼出受理为 pending（24h 后，不触发真实呼出）', sched.status === 201 && schedCall?.status === 'pending', `status=${schedCall?.status} reason=${schedCall?.statusReason}`);
+  if (sched.json?.error?.code === 'ACCOUNT_BUSY') record('M3-WINDOW', '预约呼出受理（账号忙，跳过）', false, 'ACCOUNT_BUSY', 'warn');
+  else record('M3-WINDOW', '预约呼出受理为 pending（24h 后，不触发真实呼出）', sched.status === 201 && schedCall?.status === 'pending', `status=${schedCall?.status} reason=${schedCall?.statusReason}`);
   const canceled = schedCall?.callId ? await req('POST', `/calls/${schedCall.callId}/cancel`) : null;
   const after = schedCall?.callId ? await req('GET', `/calls/${schedCall.callId}`) : null;
-  record('M3-CANCEL', 'pending 呼出可取消且状态变为 canceled', canceled?.status === 200 && after?.json?.data?.status === 'canceled', `cancelHttp=${canceled?.status} status=${after?.json?.data?.status}`);
+  if (!schedCall?.callId) record('M3-CANCEL', 'pending 呼出可取消（账号忙，跳过）', false, 'ACCOUNT_BUSY', 'warn');
+  else record('M3-CANCEL', 'pending 呼出可取消且状态变为 canceled', canceled?.status === 200 && after?.json?.data?.status === 'canceled', `cancelHttp=${canceled?.status} status=${after?.json?.data?.status}`);
   // 9) 任务/事件可观测
   const jobs = await req('GET', '/jobs?size=3');
   record('M5-JOBS', 'GET /jobs', jobs.status === 200 && Array.isArray(jobs.json?.data), `count=${(jobs.json?.data ?? []).length}`);

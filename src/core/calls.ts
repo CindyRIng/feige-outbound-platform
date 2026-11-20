@@ -1,6 +1,7 @@
 import type { Repo, CallFilter } from '../db/repo.js';
 import type { ConfigStore } from '../config.js';
 import type { Call, CallDetail, CallSummary, CallAccepted, CallEvent, DryRunResult, EventRecord, TranscriptPayload, Job } from '../types/domain.js';
+import type { UpstreamCallRecord } from '../upstream/types.js';
 import type { CallStatus, Pagination } from '../types/common.js';
 import type { EventBus } from './events.js';
 import type { JobQueue } from './jobs.js';
@@ -103,7 +104,7 @@ export class CallsService {
       if (['ended', 'no_answer', 'failed', 'canceled'].includes(c.status)) throw new AppError('CALL_ALREADY_TERMINAL', '话单已终态，不能取消');
       throw new AppError('CALL_NOT_CANCELABLE', '已提交上游，不能取消');
     }
-    const updated = await this.d.repo.updateCall(callId, { status: 'canceled', canceledAt: new Date().toISOString(), statusReason: '用户取消', updatedAt: new Date().toISOString() }, null);
+    const updated = await this.d.repo.updateCall(callId, { status: 'canceled', canceledAt: new Date().toISOString(), statusReason: '用户取消', ...(c.audioStatus === 'pending' ? { audioStatus: 'missing', transcriptStatus: 'missing', analysisStatus: 'skipped' } : {}), updatedAt: new Date().toISOString() }, null);
     await this.d.events.emit({ type: 'call.canceled', accountId: c.accountId, callId, data: { callId } });
     await this.audit('call.cancel', 'call', callId, 'success');
     return this.toSummary(updated as Call);
@@ -268,7 +269,8 @@ export class CallsService {
     void updated;
   }
   private async fail(c: Call, code: string, message: string): Promise<void> {
-    await this.d.repo.updateCall(c.callId, { status: 'failed', failedReason: message, errorCode: code, statusReason: message, dialState: 'failed', updatedAt: new Date().toISOString() } as any, null);
+    const pipelineMissing = c.audioStatus === 'pending' ? { audioStatus: 'missing', transcriptStatus: 'missing', analysisStatus: 'skipped' } : {};
+    await this.d.repo.updateCall(c.callId, { status: 'failed', failedReason: message, errorCode: code, statusReason: message, dialState: 'failed', ...pipelineMissing, updatedAt: new Date().toISOString() } as any, null);
     await this.d.events.emit({ type: 'call.failed', accountId: c.accountId, callId: c.callId, data: { callId: c.callId, errorCode: code, errorMessage: message } });
   }
   private async trackDialing(): Promise<void> {
@@ -276,35 +278,49 @@ export class CallsService {
     const now = Date.now();
     for (const c of dialing.items) {
       const submitted = c.submittedAt ? new Date(c.submittedAt).getTime() : now;
-      if (now - submitted > 120000) {
-        this.d.accounts.markBusy(c.accountId, null);
-        await this.d.repo.updateCall(c.callId, { status: 'failed', failedReason: '跟踪超时，未在上游查到话单（需人工核对）', errorCode: 'CALL_TRACKING_TIMEOUT', updatedAt: new Date().toISOString() } as any, null);
-        await this.d.events.emit({ type: 'call.failed', accountId: c.accountId, callId: c.callId, data: { callId: c.callId, errorCode: 'CALL_TRACKING_TIMEOUT' } });
-        continue;
-      }
       if (this.tracking.has(c.callId)) continue;
       this.tracking.add(c.callId);
       try {
         const token = await this.d.accounts.requireOnlineToken(c.accountId).catch(() => null);
         if (!token) continue;
-        const client = this.d.accounts.client(c.accountId, token);
-        const today = new Date().toISOString().slice(0, 10);
-        const pageRes = await client.getCallPage({ page: 1, limit: 20, startTimeBegin: today, startTimeFinish: today, callType: '', userIds: [] });
-        const match = pageRes.list.find(r => {
-          const telB = r.telB ?? r.phone ?? '';
-          const ts = r.startTime ?? r.createTime ?? 0;
-          return telB === c.toPhone && ts >= submitted - 300000;
-        });
+        const match = await this.findUpstreamRecord(c.accountId, token, c.toPhone, submitted);
         if (match) {
           await this.d.sync.applyRecord(c.accountId, match);
           this.d.accounts.markBusy(c.accountId, null);
+          continue;
         }
-      } catch (e) { this.d.log.debug('dialing track failed', { callId: c.callId, err: (e as Error).message }); }
+        // 超时前做最后一次兜底对账（防止分页/日期过滤导致漏配）
+        if (now - submitted > 120000) {
+          const last = await this.findUpstreamRecord(c.accountId, token, c.toPhone, submitted, true);
+          if (last) { await this.d.sync.applyRecord(c.accountId, last); this.d.accounts.markBusy(c.accountId, null); continue; }
+          this.d.accounts.markBusy(c.accountId, null);
+          const pipelineMissing = c.audioStatus === 'pending' ? { audioStatus: 'missing', transcriptStatus: 'missing', analysisStatus: 'skipped' } : {};
+          await this.d.repo.updateCall(c.callId, { status: 'failed', failedReason: '跟踪超时，未在上游查到话单（可能坐席未接听/线路未生成记录，需人工核对）', errorCode: 'CALL_TRACKING_TIMEOUT', ...pipelineMissing, updatedAt: new Date().toISOString() } as any, null);
+          await this.d.events.emit({ type: 'call.failed', accountId: c.accountId, callId: c.callId, data: { callId: c.callId, errorCode: 'CALL_TRACKING_TIMEOUT' } });
+        }
+      } catch (e) { this.d.log.warn('dialing track failed', { callId: c.callId, err: (e as Error).message }); }
       finally { this.tracking.delete(c.callId); }
     }
     // 清理已结束话单的 busy 标记
     const connected = await this.d.repo.listCalls({ page: 1, size: 20, statuses: ['ended', 'no_answer', 'failed', 'canceled'] } as CallFilter);
     for (const c of connected.items) this.d.accounts.markBusy(c.accountId, null);
+  }
+  /** 在今日话单中匹配刚呼出的记录；fallback=true 时去掉日期过滤再查一次。 */
+  private async findUpstreamRecord(accountId: string, token: string, toPhone: string, submitted: number, fallback = false): Promise<UpstreamCallRecord | null> {
+    const client = this.d.accounts.client(accountId, token);
+    const today = new Date().toISOString().slice(0, 10);
+    const queries: Array<Record<string, unknown>> = [{ page: 1, limit: 50, startTimeBegin: today, startTimeFinish: today, callType: '', userIds: [] }];
+    if (fallback) queries.push({ page: 1, limit: 50, callType: '', userIds: [] });
+    for (const q of queries) {
+      const pageRes = await client.getCallPage(q as any);
+      const match = pageRes.list.find(r => {
+        const telB = r.telB ?? r.phone ?? '';
+        const ts = r.startTime ?? r.createTime ?? 0;
+        return telB === toPhone && Number(ts) >= submitted - 300000;
+      });
+      if (match) return match;
+    }
+    return null;
   }
   private async audit(action: string, targetType: string, targetId: string, result: 'success' | 'failed') {
     try { await this.d.repo.insertAudit({ auditId: newAuditId(), actor: 'local-api', action, targetType, targetId, result, at: new Date().toISOString() } as any); } catch { /* ignore */ }

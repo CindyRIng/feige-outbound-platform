@@ -124,6 +124,7 @@ export class SyncService {
     const endMs = rec.endTime ?? null;
     const mappedStatus = deriveStatus(rec);
     const isEnded = mappedStatus === 'ended' || (!endMs && mappedStatus === 'no_answer');
+    const isTerminal = ['ended', 'no_answer', 'failed', 'canceled'].includes(mappedStatus);
     let call = await this.d.repo.getCallByUpstream(accountId, rec.id);
     if (!call) {
       // 可能是本地呼出正在 dialing 的记录：按被叫号码 + 时间窗口绑定
@@ -188,14 +189,18 @@ export class SyncService {
       changed = true;
     } else {
       const patch: Partial<Call> = { ...upstreamFields, upstreamStatusJson, upstreamRawJson: JSON.stringify(rec) };
-      if (mappedStatus !== call.status && !['canceled', 'failed'].includes(call.status)) {
+      // failed 通常来自本地 tracking 超时；若上游话单后来出现且状态明确，应以上游为准纠正（canceled 不纠正）
+      const canCorrectFailed = call.status === 'failed' && ['ended', 'connected', 'no_answer'].includes(mappedStatus);
+      if (mappedStatus !== call.status && (!['canceled', 'failed'].includes(call.status) || canCorrectFailed)) {
         patch.status = mappedStatus;
+        if (canCorrectFailed) { patch.failedReason = null; patch.errorCode = null; patch.statusReason = null; }
         if (mappedStatus === 'connected' && !call.answeredAt) patch.answeredAt = startMs ? new Date(startMs).toISOString() : now;
         if (mappedStatus === 'ended') { patch.answeredAt = call.answeredAt ?? (startMs ? new Date(startMs).toISOString() : now); patch.endedAt = endMs ? new Date(endMs).toISOString() : now; }
         if (mappedStatus === 'no_answer') patch.endedAt = endMs ? new Date(endMs).toISOString() : now;
         changed = true;
+        if (canCorrectFailed) this.d.log.info('call reconciled from upstream', { callId: call.callId, from: 'failed', to: mappedStatus });
       }
-      if (isEnded) {
+      if (isTerminal) {
         if (!rec.preRecordUrl) {
           if (['pending', 'in_progress'].includes(call.audioStatus)) { patch.audioStatus = 'missing'; patch.transcriptStatus = 'missing'; patch.analysisStatus = 'skipped'; changed = true; }
         } else if (['pending', 'missing', 'failed'].includes(call.audioStatus)) {
@@ -206,7 +211,7 @@ export class SyncService {
           changed = true;
         }
       }
-      const updated = await this.d.repo.updateCall(call.callId, patch, call.version);
+      const updated = await this.d.repo.updateCall(call.callId, patch, null);
       const c2 = updated ?? { ...call, ...patch } as Call;
       if (patch.status === 'ended') await this.d.events.emit({ type: 'call.ended', accountId, callId: c2.callId, data: { callId: c2.callId, durationSec: c2.durationSec } });
       if (patch.status === 'no_answer') await this.d.events.emit({ type: 'call.no_answer', accountId, callId: c2.callId, data: { callId: c2.callId } });

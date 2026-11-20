@@ -2,6 +2,18 @@
 
 本项目遵循语义化版本（SemVer）。日期均为 Asia/Shanghai。
 
+## v0.3.3 — 2026-11-20
+
+### Fixed
+- **外呼卡在 dialing / 误标 failed**：上游话单存在延迟可见（实测可达数分钟），本地 tracking 120s 超时后置 failed 且旧逻辑不允许再纠正。现修复：
+  - 同步对账允许 `failed → ended/no_answer/connected` 纠正（以上游为准），清除失败原因并记录 `call reconciled from upstream`；
+  - 追踪器增加多页/无日期兜底查询与异常告警（warn），超时提示更明确；
+  - 失败/取消话单的流水线状态自动收口为 `missing/skipped`（历史 34 条遗留 pending 已清理；同主叫录音延迟出现仍会 `missing→pending` 回补）。
+- 测试时间炸弹修复（24h 统计断言使用相对时间）；验收脚本对账号忙/短 JWT 更健壮。
+
+### Changed
+- 版本 0.3.2 → 0.3.3。
+
 ## v0.3.2 — 2026-11-14
 
 ### Fixed

@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green" />
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D22.5-339933" />
-  <img alt="version" src="https://img.shields.io/badge/version-0.3.2-blue" />
+  <img alt="version" src="https://img.shields.io/badge/version-0.3.3-blue" />
   <img alt="tests" src="https://img.shields.io/badge/tests-93%2F93-brightgreen" />
   <img alt="acceptance" src="https://img.shields.io/badge/acceptance-27%2F27-brightgreen" />
   <img alt="openapi" src="https://img.shields.io/badge/OpenAPI-3.1-85ea2d" />
