@@ -2,6 +2,15 @@
 
 本项目遵循语义化版本（SemVer）。日期均为 Asia/Shanghai。
 
+## v0.3.4 — 2026-11-21
+
+### Fixed
+- **已登录页面但 JWT 过期导致登录失败**：profile 仍处于飞鸽登录态、但本地提取不到有效 JWT 时，login-worker 现在会自动清理浏览器会话（cookie/localStorage/sessionStorage）并强制走一次完整登录（滑块），避免 `LOGIN_FAILED`。
+- 实测：JWT 过期后 `feige account login main --force --yes` 强制重登成功，账号恢复 online（JWT 7 天，至 2026-11-28 10:50）。
+
+### Changed
+- 版本 0.3.3 → 0.3.4。
+
 ## v0.3.3 — 2026-11-20
 
 ### Fixed

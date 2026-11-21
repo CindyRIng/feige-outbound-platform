@@ -274,6 +274,24 @@ async function attemptLogin(context, page, attemptNo) {
   let existing = pickValidJwt(await extractJwtCandidates(page, context, null));
   if (existing) return { ok: true, jwt: existing.jwt, payload: existing.payload, reusedSession: true };
 
+  // 兼容“页面仍处于登录态但本地提取不到有效 JWT”（JWT 过期/存储变化）：清理会话后强制重新登录
+  const loggedInPage = await page
+    .evaluate(() => {
+      try {
+        const hash = String(location.hash || '');
+        const hasPasswordInput = !!document.querySelector('input[type=password]');
+        return /menu|home|dashboard/i.test(hash) || (!hasPasswordInput && !!document.querySelector('.el-menu, .sidebar, .layout-header'));
+      } catch { return false; }
+    })
+    .catch(() => false);
+  if (loggedInPage) {
+    log('session present but no valid jwt extracted; forcing fresh login');
+    await context.clearCookies().catch(() => undefined);
+    await page.evaluate(() => { try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ } }).catch(() => undefined);
+    await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 90000 }).catch((e) => log('re-goto warn', e.message));
+    await sleep(2500 + Math.random() * 1500);
+  }
+
   await fillCredentials(page);
   const agreed = await ensureAgreementAccepted(page);
   if (!agreed) log('agreement checkbox not accepted; login may be blocked');
